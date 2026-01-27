@@ -155,8 +155,20 @@ async fn main() -> Result<()> {
         }
         Commands::InstallSkills => {
             println!("Installing Claude Code Skills...");
-            // TODO: Implement skills installation
-            println!("✓ Skills installed");
+
+            let installer = claude_rag::skills::SkillsInstaller::new()
+                .map_err(|e| anyhow::anyhow!("Failed to create skills installer: {}", e))?;
+
+            installer.install_skills()
+                .map_err(|e| anyhow::anyhow!("Failed to install skills: {}", e))?;
+
+            println!("✓ Skills installed to: {}", installer.skills_dir().display());
+            println!("  Available skills:");
+            println!("    /rag-query     - Query all indexed content");
+            println!("    /rag-code      - Search source code");
+            println!("    /rag-docs      - Search documentation");
+            println!("    /rag-session   - Search previous sessions");
+            println!("    /rag-timeline  - Build feature timeline");
         }
     }
 

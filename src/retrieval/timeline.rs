@@ -10,23 +10,12 @@ use chrono::{DateTime, Utc};
 use std::collections::{HashMap, BTreeMap};
 
 /// Feature timeline for tracking evolution.
-pub struct FeatureTimeline {
-    /// Cached events sorted by timestamp.
-    events: Vec<TimelineEvent>,
-    /// Events grouped by topic/feature.
-    topics: HashMap<String, Vec<TimelineEvent>>,
-    /// Current state markers.
-    current_markers: HashMap<String, String>,
-}
+pub struct FeatureTimeline;
 
 impl FeatureTimeline {
     /// Create a new timeline builder.
     pub fn new() -> Self {
-        Self {
-            events: Vec::new(),
-            topics: HashMap::new(),
-            current_markers: HashMap::new(),
-        }
+        Self
     }
 
     /// Build timeline from indexed content.
@@ -392,8 +381,8 @@ mod tests {
 
     #[test]
     fn test_timeline_new() {
-        let timeline = FeatureTimeline::new();
-        assert_eq!(timeline.events.len(), 0);
+        let _timeline = FeatureTimeline::new();
+        // FeatureTimeline is now a zero-sized type used for its methods
     }
 
     #[test]

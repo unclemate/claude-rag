@@ -29,6 +29,7 @@ struct EmbeddingRequest {
 
 /// Zhipu AI embedding API response.
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct EmbeddingResponse {
     data: Vec<EmbeddingData>,
     model: String,
@@ -44,6 +45,7 @@ struct EmbeddingData {
 
 /// Token usage information.
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct Usage {
     prompt_tokens: usize,
     total_tokens: usize,
@@ -56,6 +58,7 @@ struct ApiError {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct ErrorDetail {
     message: String,
     #[serde(default)]

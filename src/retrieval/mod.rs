@@ -6,4 +6,4 @@ pub mod timeline;
 
 pub use confidence::{ConfidenceLevel, ConfidenceScore};
 pub use decay::TimeDecay;
-pub use timeline::FeatureTimeline;
+pub use timeline::{FeatureTimeline, TimelineEvent, TimelineEventType, TimelineStats};

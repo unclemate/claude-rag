@@ -61,11 +61,11 @@ Follow the task plan in `.ralph/@fix_plan.md` which is organized into phases:
 - **Search the codebase** before assuming something isn't implemented
 - **Write comprehensive tests** with clear documentation
 - **Update @fix_plan.md** with your learnings
-- **COMMIT CODE AFTER EVERY LOOP** - This is MANDATORY ⚠️
+- **Commit code when appropriate** - Use your judgment
 
-### Git Commit Workflow (MANDATORY) ⚠️
+### Git Commit Workflow
 
-**You MUST commit your work at the end of EVERY loop**, regardless of progress:
+**Commit your work when appropriate**:
 
 ```bash
 # 1. Check what changed
@@ -114,11 +114,12 @@ Co-Authored-By: Someone <someone@example.com>
 feat(config): add Config struct
 ```
 
-**CRITICAL:** Even if the loop made partial progress or encountered issues, you MUST commit:
-- Partial implementations are better than lost work
-- Failed attempts provide learning context
+**Recommendations for committing:**
+- Commit when you complete a logical unit of work
+- Commit before significant refactoring or experimental changes
+- Partial implementations can be committed to save progress
 - WIP commits can be amended or squash later
-- **NEVER end a loop without committing**
+- Use your judgment based on the work performed
 
 ### Testing Guidelines
 - **LIMIT testing to ~20%** of total effort per loop
@@ -182,10 +183,10 @@ RECOMMENDATION: <one line summary of what to do next>
 ---END_RALPH_STATUS---
 ```
 
-**IMPORTANT:** The `GIT_COMMIT` field MUST contain:
+**IMPORTANT:** The `GIT_COMMIT` field should contain:
 - The actual commit hash if you committed this loop
-- "NOT_COMMITTED" only if commit failed (explain why in recommendations)
-- **You should never end a loop without attempting a commit**
+- "SKIPPED" if no commit was made (e.g., minor changes, testing, etc.)
+- Leave empty if not applicable
 
 ---
 
@@ -253,12 +254,7 @@ Follow `.ralph/@fix_plan.md` and choose the most important item to implement nex
 
 ## Important Notes
 
-0. **⚠️ MANDATORY: COMMIT AFTER EVERY LOOP ⚠️**
-   - **You MUST commit code at the end of EVERY loop**
-   - Use `git add -A` followed by `git commit` with descriptive message
-   - Format: `<type>(<scope>): <description>` (Conventional Commits)
-   - **NO EXCEPTIONS** - Partial progress, failures, all must be committed
-   - This ensures no work is lost between loops
+0. **Git Commit Policy**: Commit code at your discretion based on logical work completion. Use Conventional Commits format `<type>(<scope>): <description>` when committing.
 
 1. **Git Integration (⭐)**: This is a key differentiator. Git commits/diffs provide authoritative change records that help distinguish current vs deprecated code.
 

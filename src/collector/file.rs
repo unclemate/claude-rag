@@ -1,7 +1,5 @@
 //! File collection and scanning.
 
-use crate::error::Result;
-
 /// File collector.
 pub struct FileCollector;
 

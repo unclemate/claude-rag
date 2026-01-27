@@ -267,26 +267,26 @@
 ## Phase 7: Time-Aware Retrieval ⭐
 
 ### 7.1 Confidence Engine (`src/retrieval/confidence.rs`)
-- [ ] Define `ConfidenceLevel` enum (Highest=5, High=4, Medium=3, Low=2, Lowest=1)
-- [ ] Implement `base_weight()` method
-- [ ] Implement `from_content_type()` - Calculate from content type and timestamp
+- [x] Define `ConfidenceLevel` enum (Highest=5, High=4, Medium=3, Low=2, Lowest=1)
+- [x] Implement `base_weight()` method
+- [x] Implement `from_content_type()` - Calculate from content type and timestamp
 - [ ] Implement Git state synchronization check
-- [ ] Add tests
+- [x] Add tests
 
 ### 7.2 Time Decay Calculator (`src/retrieval/decay.rs`)
-- [ ] Implement exponential decay function
-- [ ] Add configurable decay rates per content type
-- [ ] Combine with semantic similarity
-- [ ] Add tests
+- [x] Implement exponential decay function
+- [x] Add configurable decay rates per content type
+- [x] Combine with semantic similarity
+- [x] Add tests
 
 ### 7.3 Timeline Builder (`src/retrieval/timeline.rs`)
-- [ ] Define `FeatureTimeline` struct
-- [ ] Define `TimelineEvent` enum (GitChange, Discussion, Implementation)
-- [ ] Implement timeline building from indexed content
-- [ ] Cluster events by feature/topic
-- [ ] Identify current state vs historical
-- [ ] Sort chronologically
-- [ ] Add tests
+- [x] Define `FeatureTimeline` struct
+- [x] Define `TimelineEvent` enum (GitChange, Discussion, Implementation)
+- [x] Implement timeline building from indexed content
+- [x] Cluster events by feature/topic
+- [x] Identify current state vs historical
+- [x] Sort chronologically
+- [x] Add tests
 
 ### 7.4 Enhanced Results (`src/results.rs`)
 - [ ] Define `EnhancedItem` struct with:

@@ -1,9 +1,10 @@
 //! Confidence level calculation for time-aware retrieval.
 
 use crate::models::ContentType;
+use serde::{Deserialize, Serialize};
 
 /// Confidence level for indexed content.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ConfidenceLevel {
     /// Highest confidence - current code (matches Git HEAD).
     Highest = 5,

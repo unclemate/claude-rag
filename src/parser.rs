@@ -19,11 +19,15 @@ const INDEX_FILE: &str = "index.jsonl";
 
 /// Session metadata from the index file.
 #[derive(Debug, Clone)]
-struct SessionMeta {
-    id: String,
-    title: Option<String>,
-    project_path: String,
-    created_at: DateTime<Utc>,
+pub struct SessionMeta {
+    /// Session ID.
+    pub id: String,
+    /// Session title.
+    pub title: Option<String>,
+    /// Project path.
+    pub project_path: String,
+    /// Creation timestamp.
+    pub created_at: DateTime<Utc>,
 }
 
 /// Parsed session with messages.
