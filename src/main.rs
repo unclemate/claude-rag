@@ -147,7 +147,7 @@ fn handle_init(force: bool) -> Result<()> {
     Ok(())
 }
 
-fn handle_index(all: bool, project: Option<String>, force: bool, r#type: Option<String>) -> Result<()> {
+fn handle_index(_all: bool, _project: Option<String>, force: bool, r#type: Option<String>) -> Result<()> {
     println!("Indexing...");
 
     let current_dir = std::env::current_dir()

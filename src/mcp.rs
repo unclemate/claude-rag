@@ -408,7 +408,7 @@ mod tests {
 
     #[test]
     fn test_mcp_server_default() {
-        let _server = McpServer::default();
+        let _server = McpServer;
     }
 
     #[test]

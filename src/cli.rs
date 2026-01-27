@@ -394,8 +394,7 @@ mod tests {
 
         // Need to release storage between calls
         let result1 = {
-            let r = index_project(project_path, options.clone(), None).unwrap();
-            r
+            index_project(project_path, options.clone(), None).unwrap()
         };
         assert_eq!(result1.file_stats.files_collected, 1);
 

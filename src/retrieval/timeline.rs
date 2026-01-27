@@ -397,7 +397,7 @@ mod tests {
         assert_eq!(events.len(), 2);
         assert_eq!(events[0].event_type, TimelineEventType::GitChange);
         // Most recent first
-        assert_eq!(events[0].description.contains("fix"), true);
+        assert!(events[0].description.contains("fix"));
     }
 
     #[test]
