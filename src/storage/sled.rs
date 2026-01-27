@@ -19,10 +19,10 @@ impl StorageManager {
 
         // Create directory if it doesn't exist
         std::fs::create_dir_all(&db_dir)
-            .map_err(|e| RagError::Io(e))?;
+            .map_err(RagError::Io)?;
 
         let db = sled::open(&db_dir)
-            .map_err(|e| RagError::Sled(e))?;
+            .map_err(RagError::Sled)?;
 
         Ok(Self { db })
     }
@@ -280,7 +280,7 @@ impl StorageManager {
 
     /// Get database size in bytes.
     pub fn size_on_disk(&self) -> Result<u64> {
-        self.db.size_on_disk().map_err(|e| RagError::Sled(e))
+        self.db.size_on_disk().map_err(RagError::Sled)
     }
 
     /// Check if database is empty.

@@ -11,6 +11,7 @@
 #![warn(missing_docs)]
 #![warn(clippy::all)]
 
+pub mod cli;
 pub mod collector;
 pub mod config;
 pub mod daemon;
@@ -18,6 +19,7 @@ pub mod embedding;
 pub mod error;
 pub mod formatter;
 pub mod hook;
+pub mod indexer;
 pub mod mcp;
 pub mod results;
 pub mod parser;

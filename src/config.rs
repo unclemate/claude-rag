@@ -15,7 +15,7 @@ const GLOBAL_CONFIG_PATH: &str = ".claude/rag/config.toml";
 const PROJECT_CONFIG_NAME: &str = ".rag/config.json";
 
 /// Main configuration structure.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Config {
     /// Embedding API configuration.
     pub embedding: EmbeddingConfig,
@@ -31,20 +31,6 @@ pub struct Config {
     pub confidence: ConfidenceConfig,
     /// Retrieval options.
     pub retrieval: RetrievalConfig,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            embedding: EmbeddingConfig::default(),
-            hnsw: HnswConfig::default(),
-            index: IndexConfig::default(),
-            daemon: DaemonConfig::default(),
-            git: GitConfig::default(),
-            confidence: ConfidenceConfig::default(),
-            retrieval: RetrievalConfig::default(),
-        }
-    }
 }
 
 /// Embedding API configuration.

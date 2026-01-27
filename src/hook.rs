@@ -45,7 +45,7 @@ impl HookManager {
     pub fn install_hooks(&self) -> Result<()> {
         // Create hooks directory if it doesn't exist
         fs::create_dir_all(&self.hooks_dir)
-            .map_err(|e| RagError::Io(e))?;
+            .map_err(RagError::Io)?;
 
         // Install session-start hook
         self.install_session_start_hook()?;
@@ -59,18 +59,18 @@ impl HookManager {
         let hook_content = self.generate_session_start_hook();
 
         fs::write(&hook_path, hook_content)
-            .map_err(|e| RagError::Io(e))?;
+            .map_err(RagError::Io)?;
 
         // Make executable on Unix
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
             let mut perms = fs::metadata(&hook_path)
-                .map_err(|e| RagError::Io(e))?
+                .map_err(RagError::Io)?
                 .permissions();
             perms.set_mode(0o755);
             fs::set_permissions(&hook_path, perms)
-                .map_err(|e| RagError::Io(e))?;
+                .map_err(RagError::Io)?;
         }
 
         Ok(())
@@ -161,7 +161,7 @@ echo "$(date -Iseconds) [END] Session: $SESSION_ID | Project: $PROJECT_PATH" >> 
     pub fn uninstall_hooks(&self) -> Result<()> {
         if self.hooks_dir.exists() {
             fs::remove_dir_all(&self.hooks_dir)
-                .map_err(|e| RagError::Io(e))?;
+                .map_err(RagError::Io)?;
         }
         Ok(())
     }

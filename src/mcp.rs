@@ -38,7 +38,7 @@ impl McpServer {
         let reader = BufReader::new(stdin);
 
         for line in reader.lines() {
-            let line = line.map_err(|e| RagError::Io(e))?;
+            let line = line.map_err(RagError::Io)?;
 
             if line.trim().is_empty() {
                 continue;
@@ -56,9 +56,9 @@ impl McpServer {
                 .map_err(|e| RagError::Parse(format!("Failed to serialize response: {}", e)))?;
 
             writeln!(stdout, "{}", response_json)
-                .map_err(|e| RagError::Io(e))?;
+                .map_err(RagError::Io)?;
             stdout.flush()
-                .map_err(|e| RagError::Io(e))?;
+                .map_err(RagError::Io)?;
         }
 
         Ok(())

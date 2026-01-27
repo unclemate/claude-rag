@@ -37,7 +37,7 @@ impl SkillsInstaller {
     pub fn install_skills(&self) -> Result<()> {
         // Create skills directory if it doesn't exist
         fs::create_dir_all(&self.skills_dir)
-            .map_err(|e| RagError::Io(e))?;
+            .map_err(RagError::Io)?;
 
         // Install each skill
         self.install_skill("rag-query", &self.generate_rag_query_skill())?;
@@ -54,18 +54,18 @@ impl SkillsInstaller {
         let skill_path = self.skills_dir.join(name);
 
         fs::write(&skill_path, content)
-            .map_err(|e| RagError::Io(e))?;
+            .map_err(RagError::Io)?;
 
         // Make executable on Unix
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
             let mut perms = fs::metadata(&skill_path)
-                .map_err(|e| RagError::Io(e))?
+                .map_err(RagError::Io)?
                 .permissions();
             perms.set_mode(0o755);
             fs::set_permissions(&skill_path, perms)
-                .map_err(|e| RagError::Io(e))?;
+                .map_err(RagError::Io)?;
         }
 
         Ok(())

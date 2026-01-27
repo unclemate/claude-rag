@@ -75,9 +75,9 @@ impl SessionParser {
 
         // Each subdirectory in .claude/sessions/ corresponds to a project
         for entry in fs::read_dir(&sessions_dir)
-            .map_err(|e| RagError::Io(e))?
+            .map_err(RagError::Io)?
         {
-            let entry = entry.map_err(|e| RagError::Io(e))?;
+            let entry = entry.map_err(RagError::Io)?;
             let path = entry.path();
 
             // Skip if not a directory
@@ -323,7 +323,7 @@ impl SessionParser {
             .map(|d| DateTime::from_timestamp(d.as_secs() as i64, 0).unwrap_or_else(Utc::now));
 
         if let Some(last_indexed) = last_indexed {
-            Ok(modified.map_or(true, |m| m > last_indexed))
+            Ok(modified.is_none_or(|m| m > last_indexed))
         } else {
             Ok(true)
         }

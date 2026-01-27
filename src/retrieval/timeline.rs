@@ -153,11 +153,10 @@ impl FeatureTimeline {
     pub fn find_deprecating_commit(&self, commits: &[Commit], file_path: &str) -> Option<String> {
         // Look for commits that delete the file
         for commit in commits {
-            if commit.message.to_lowercase().contains("deprecate") ||
-               commit.message.to_lowercase().contains("remove") {
-                if commit.message.contains(file_path) {
-                    return Some(commit.id.clone());
-                }
+            if (commit.message.to_lowercase().contains("deprecate") ||
+                commit.message.to_lowercase().contains("remove"))
+                && commit.message.contains(file_path) {
+                return Some(commit.id.clone());
             }
         }
         None

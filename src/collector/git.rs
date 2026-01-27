@@ -64,9 +64,8 @@ impl GitCollector {
             .map_err(|e| RagError::Git(format!("Failed to push HEAD: {e}")))?;
 
         let mut commits = Vec::new();
-        let mut count = 0;
 
-        for oid in revwalk {
+        for (count, oid) in revwalk.enumerate() {
             if let Some(max) = max_count {
                 if count >= max {
                     break;
@@ -77,8 +76,7 @@ impl GitCollector {
             let commit = repo.find_commit(oid)
                 .map_err(|e| RagError::Git(format!("Failed to find commit: {e}")))?;
 
-            commits.push(self.convert_commit(&commit, &repo)?);
-            count += 1;
+            commits.push(self.convert_commit(&commit, repo)?);
         }
 
         Ok(commits)
@@ -101,7 +99,7 @@ impl GitCollector {
 
         let parent = commit.parent(0).ok();
         let tree = commit.tree().map_err(|e| RagError::Git(format!("Failed to get tree: {e}")))?;
-        let parent_tree = parent.as_ref().map(|p| p.tree().ok()).flatten();
+        let parent_tree = parent.as_ref().and_then(|p| p.tree().ok());
 
         // Create diff object
         let diff = if let Some(pt) = parent_tree {
@@ -145,16 +143,11 @@ impl GitCollector {
         // Extract scope if present
         let scope = if let Some(typ) = &conv_type {
             let scope_start = cleaned.find(&format!("{typ}("));
-            if let Some(start) = scope_start {
-                let scope_end = cleaned[start..].find(')');
-                if let Some(end) = scope_end {
-                    Some(cleaned[start + typ.len() + 1..start + end].to_string())
-                } else {
-                    None
-                }
-            } else {
-                None
-            }
+            scope_start.and_then(|start| {
+                cleaned[start..].find(')').map(|end| {
+                    cleaned[start + typ.len() + 1..start + end].to_string()
+                })
+            })
         } else {
             None
         };
@@ -317,10 +310,10 @@ impl GitCollector {
     /// Get the text content of a diff.
     fn get_diff_text(&self, diff: &Diff, _delta: &git2::DiffDelta) -> String {
         let mut content = String::new();
-        if let Err(_) = diff.print(git2::DiffFormat::Patch, |_, _, line| {
+        if diff.print(git2::DiffFormat::Patch, |_, _, line| {
             content.push_str(std::str::from_utf8(line.content()).unwrap_or(""));
             true
-        }) {
+        }).is_err() {
             return String::new();
         }
         content
@@ -419,7 +412,7 @@ impl GitCollector {
         let parent = commit.parent(0).ok();
 
         let tree = commit.tree().map_err(|e| RagError::Git(format!("Failed to get tree: {e}")))?;
-        let parent_tree = parent.as_ref().map(|p| p.tree().ok()).flatten();
+        let parent_tree = parent.as_ref().and_then(|p| p.tree().ok());
 
         let diff = if let Some(pt) = parent_tree {
             repo.diff_tree_to_tree(Some(&pt), Some(&tree), None)

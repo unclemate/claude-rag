@@ -107,18 +107,18 @@ impl Daemon {
         // Remove old socket file if exists
         if self.socket_path.exists() {
             std::fs::remove_file(&self.socket_path)
-                .map_err(|e| RagError::Io(e))?;
+                .map_err(RagError::Io)?;
         }
 
         // Create socket directory if needed
         if let Some(parent) = self.socket_path.parent() {
             std::fs::create_dir_all(parent)
-                .map_err(|e| RagError::Io(e))?;
+                .map_err(RagError::Io)?;
         }
 
         // Bind to socket
         let listener = UnixListener::bind(&self.socket_path)
-            .map_err(|e| RagError::Io(e))?;
+            .map_err(RagError::Io)?;
 
         // Write PID file
         self.write_pid()?;
@@ -182,14 +182,14 @@ impl Daemon {
 
             // Read message from client
             let n = buf_reader.read_line(&mut line).await
-                .map_err(|e| RagError::Io(e))?;
+                .map_err(RagError::Io)?;
 
             if n == 0 {
                 break; // Connection closed
             }
 
             // Parse message
-            let notification: HookNotification = serde_json::from_str(&line.trim())
+            let notification: HookNotification = serde_json::from_str(line.trim())
                 .map_err(|e| RagError::Parse(format!("Invalid notification: {}", e)))?;
 
             // Handle notification
@@ -197,9 +197,9 @@ impl Daemon {
 
             // Send response
             writer.write_all(response.as_bytes()).await
-                .map_err(|e| RagError::Io(e))?;
+                .map_err(RagError::Io)?;
             writer.write_all(b"\n").await
-                .map_err(|e| RagError::Io(e))?;
+                .map_err(RagError::Io)?;
         }
 
         Ok(())
@@ -269,7 +269,7 @@ impl Daemon {
         // Check if PID file exists and process is running
         if Path::new(PID_FILE).exists() {
             let pid_content = std::fs::read_to_string(PID_FILE)
-                .map_err(|e| RagError::Io(e))?;
+                .map_err(RagError::Io)?;
             let pid: u32 = pid_content.trim()
                 .parse()
                 .map_err(|_| RagError::Parse("Invalid PID".to_string()))?;
@@ -302,7 +302,7 @@ impl Daemon {
     fn write_pid(&self) -> Result<()> {
         let pid = std::process::id();
         std::fs::write(PID_FILE, pid.to_string())
-            .map_err(|e| RagError::Io(e))?;
+            .map_err(RagError::Io)?;
         Ok(())
     }
 
@@ -311,13 +311,13 @@ impl Daemon {
         // Remove socket file
         if self.socket_path.exists() {
             std::fs::remove_file(&self.socket_path)
-                .map_err(|e| RagError::Io(e))?;
+                .map_err(RagError::Io)?;
         }
 
         // Remove PID file
         if Path::new(PID_FILE).exists() {
             std::fs::remove_file(PID_FILE)
-                .map_err(|e| RagError::Io(e))?;
+                .map_err(RagError::Io)?;
         }
 
         Ok(())

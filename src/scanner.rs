@@ -59,7 +59,7 @@ impl FileScanner {
     /// * `project_path` - Path to the project root
     pub fn new(project_path: &Path) -> Result<Self> {
         let project_root = fs::canonicalize(project_path)
-            .map_err(|e| RagError::Io(e))?;
+            .map_err(RagError::Io)?;
 
         // Load .gitignore if present
         let gitignore_path = project_root.join(".gitignore");
