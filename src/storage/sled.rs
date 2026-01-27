@@ -5,6 +5,7 @@ use std::path::Path;
 
 use crate::error::{Result, RagError};
 use crate::models::{Commit, File, GitDiff, Message, Session, Symbol};
+use crate::models::diff::ChangeType;
 
 /// Storage manager for project data.
 pub struct StorageManager {
@@ -32,6 +33,8 @@ impl StorageManager {
         &self.db
     }
 
+    // ==================== Primary Key Operations ====================
+
     /// Store a session.
     pub fn store_session(&self, session: &Session) -> Result<()> {
         let key = format!("session:{}", session.id);
@@ -56,7 +59,22 @@ impl StorageManager {
         let key = format!("message:{}", message.id);
         let value = serde_json::to_vec(message)?;
         self.db.insert(key, value)?;
+
+        // Update session_messages index
+        self.add_to_session_messages(&message.session_id, &message.id)?;
+
         Ok(())
+    }
+
+    /// Retrieve a message.
+    pub fn get_message(&self, id: &str) -> Result<Option<Message>> {
+        let key = format!("message:{}", id);
+        if let Some(value) = self.db.get(key)? {
+            let message = serde_json::from_slice(&value)?;
+            Ok(Some(message))
+        } else {
+            Ok(None)
+        }
     }
 
     /// Store a file.
@@ -64,7 +82,22 @@ impl StorageManager {
         let key = format!("file:{}", file.id);
         let value = serde_json::to_vec(file)?;
         self.db.insert(key, value)?;
+
+        // Update project_files index
+        self.add_to_project_files(&file.project_path, &file.id)?;
+
         Ok(())
+    }
+
+    /// Retrieve a file.
+    pub fn get_file(&self, id: &str) -> Result<Option<File>> {
+        let key = format!("file:{}", id);
+        if let Some(value) = self.db.get(key)? {
+            let file = serde_json::from_slice(&value)?;
+            Ok(Some(file))
+        } else {
+            Ok(None)
+        }
     }
 
     /// Store a symbol.
@@ -72,7 +105,22 @@ impl StorageManager {
         let key = format!("symbol:{}", symbol.id);
         let value = serde_json::to_vec(symbol)?;
         self.db.insert(key, value)?;
+
+        // Update file_symbols index
+        self.add_to_file_symbols(&symbol.file_id, &symbol.id)?;
+
         Ok(())
+    }
+
+    /// Retrieve a symbol.
+    pub fn get_symbol(&self, id: &str) -> Result<Option<Symbol>> {
+        let key = format!("symbol:{}", id);
+        if let Some(value) = self.db.get(key)? {
+            let symbol = serde_json::from_slice(&value)?;
+            Ok(Some(symbol))
+        } else {
+            Ok(None)
+        }
     }
 
     /// Store a commit.
@@ -83,15 +131,130 @@ impl StorageManager {
         Ok(())
     }
 
+    /// Retrieve a commit.
+    pub fn get_commit(&self, id: &str) -> Result<Option<Commit>> {
+        let key = format!("commit:{}", id);
+        if let Some(value) = self.db.get(key)? {
+            let commit = serde_json::from_slice(&value)?;
+            Ok(Some(commit))
+        } else {
+            Ok(None)
+        }
+    }
+
     /// Store a git diff.
     pub fn store_diff(&self, diff: &GitDiff) -> Result<()> {
         let key = format!("diff:{}", diff.id);
         let value = serde_json::to_vec(diff)?;
         self.db.insert(key, value)?;
+
+        // Update file_commits index
+        self.add_to_file_commits(&diff.project_path, &diff.file_path, &diff.commit_id)?;
+
         Ok(())
     }
 
-    /// Get or create index state for an item.
+    /// Retrieve a git diff.
+    pub fn get_diff(&self, id: &str) -> Result<Option<GitDiff>> {
+        let key = format!("diff:{}", id);
+        if let Some(value) = self.db.get(key)? {
+            let diff = serde_json::from_slice(&value)?;
+            Ok(Some(diff))
+        } else {
+            Ok(None)
+        }
+    }
+
+    // ==================== Auxiliary Index Operations ====================
+
+    /// Add message ID to session_messages index.
+    fn add_to_session_messages(&self, session_id: &str, message_id: &str) -> Result<()> {
+        let key = format!("session_messages:{}", session_id);
+        let mut ids = self.get_id_list(&key)?;
+        if !ids.contains(&message_id.to_string()) {
+            ids.push(message_id.to_string());
+            self.set_id_list(&key, &ids)?;
+        }
+        Ok(())
+    }
+
+    /// Get all message IDs for a session.
+    pub fn get_session_messages(&self, session_id: &str) -> Result<Vec<String>> {
+        let key = format!("session_messages:{}", session_id);
+        self.get_id_list(&key)
+    }
+
+    /// Add file ID to project_files index.
+    fn add_to_project_files(&self, project_path: &str, file_id: &str) -> Result<()> {
+        let key = format!("project_files:{}", project_path);
+        let mut ids = self.get_id_list(&key)?;
+        if !ids.contains(&file_id.to_string()) {
+            ids.push(file_id.to_string());
+            self.set_id_list(&key, &ids)?;
+        }
+        Ok(())
+    }
+
+    /// Get all file IDs for a project.
+    pub fn get_project_files(&self, project_path: &str) -> Result<Vec<String>> {
+        let key = format!("project_files:{}", project_path);
+        self.get_id_list(&key)
+    }
+
+    /// Add symbol ID to file_symbols index.
+    fn add_to_file_symbols(&self, file_id: &str, symbol_id: &str) -> Result<()> {
+        let key = format!("file_symbols:{}", file_id);
+        let mut ids = self.get_id_list(&key)?;
+        if !ids.contains(&symbol_id.to_string()) {
+            ids.push(symbol_id.to_string());
+            self.set_id_list(&key, &ids)?;
+        }
+        Ok(())
+    }
+
+    /// Get all symbol IDs for a file.
+    pub fn get_file_symbols(&self, file_id: &str) -> Result<Vec<String>> {
+        let key = format!("file_symbols:{}", file_id);
+        self.get_id_list(&key)
+    }
+
+    /// Add commit ID to file_commits index.
+    fn add_to_file_commits(&self, project_path: &str, file_path: &str, commit_id: &str) -> Result<()> {
+        let key = format!("file_commits:{}:{}", project_path, file_path);
+        let mut ids = self.get_id_list(&key)?;
+        if !ids.contains(&commit_id.to_string()) {
+            ids.push(commit_id.to_string());
+            self.set_id_list(&key, &ids)?;
+        }
+        Ok(())
+    }
+
+    /// Get all commit IDs for a file.
+    pub fn get_file_commits(&self, project_path: &str, file_path: &str) -> Result<Vec<String>> {
+        let key = format!("file_commits:{}:{}", project_path, file_path);
+        self.get_id_list(&key)
+    }
+
+    /// Get ID list from an index key.
+    fn get_id_list(&self, key: &str) -> Result<Vec<String>> {
+        if let Some(value) = self.db.get(key)? {
+            let ids: Vec<String> = serde_json::from_slice(&value)?;
+            Ok(ids)
+        } else {
+            Ok(Vec::new())
+        }
+    }
+
+    /// Set ID list for an index key.
+    fn set_id_list(&self, key: &str, ids: &[String]) -> Result<()> {
+        let value = serde_json::to_vec(ids)?;
+        self.db.insert(key, value)?;
+        Ok(())
+    }
+
+    // ==================== Index State Operations ====================
+
+    /// Get index state for an item.
     pub fn get_index_state(&self, id: &str) -> Result<Option<String>> {
         let key = format!("index_state:{}", id);
         if let Some(value) = self.db.get(key)? {
@@ -108,10 +271,22 @@ impl StorageManager {
         Ok(())
     }
 
+    // ==================== Database Operations ====================
+
     /// Flush database to disk.
     pub fn flush(&self) -> Result<()> {
         self.db.flush()?;
         Ok(())
+    }
+
+    /// Get database size in bytes.
+    pub fn size_on_disk(&self) -> Result<u64> {
+        self.db.size_on_disk().map_err(|e| RagError::Sled(e))
+    }
+
+    /// Check if database is empty.
+    pub fn is_empty(&self) -> bool {
+        self.db.is_empty()
     }
 }
 
@@ -119,6 +294,7 @@ impl StorageManager {
 mod tests {
     use super::*;
     use tempfile::TempDir;
+    use chrono::Utc;
 
     #[test]
     fn test_storage_manager_open() {
@@ -139,7 +315,7 @@ mod tests {
             id: "test-session".to_string(),
             title: Some("Test".to_string()),
             project_path: project_path.display().to_string(),
-            started_at: chrono::Utc::now(),
+            started_at: Utc::now(),
             ended_at: None,
             message_count: 0,
             indexed: false,
@@ -150,5 +326,128 @@ mod tests {
 
         assert!(retrieved.is_some());
         assert_eq!(retrieved.unwrap().id, "test-session");
+    }
+
+    #[test]
+    fn test_message_with_session_index() {
+        let temp_dir = TempDir::new().unwrap();
+        let project_path = temp_dir.path();
+        let storage = StorageManager::open_project_db(project_path).unwrap();
+
+        let message = Message {
+            id: "msg-1".to_string(),
+            session_id: "session-1".to_string(),
+            role: crate::models::Role::User,
+            content: "Hello".to_string(),
+            timestamp: Utc::now(),
+            tokens: None,
+            model: None,
+        };
+
+        storage.store_message(&message).unwrap();
+        let retrieved = storage.get_message("msg-1").unwrap();
+
+        assert!(retrieved.is_some());
+        assert_eq!(retrieved.unwrap().id, "msg-1");
+
+        // Check session_messages index
+        let msg_ids = storage.get_session_messages("session-1").unwrap();
+        assert_eq!(msg_ids, vec!["msg-1".to_string()]);
+    }
+
+    #[test]
+    fn test_file_with_project_index() {
+        let temp_dir = TempDir::new().unwrap();
+        let project_path = temp_dir.path();
+        let storage = StorageManager::open_project_db(project_path).unwrap();
+
+        let file = File {
+            id: "file-1".to_string(),
+            project_path: project_path.display().to_string(),
+            file_path: "src/main.rs".to_string(),
+            language: Some("rust".to_string()),
+            modified_at: Utc::now(),
+            size: 1024,
+            content_hash: "abc123".to_string(),
+            indexed: false,
+        };
+
+        storage.store_file(&file).unwrap();
+        let retrieved = storage.get_file("file-1").unwrap();
+
+        assert!(retrieved.is_some());
+
+        // Check project_files index
+        let file_ids = storage.get_project_files(&project_path.display().to_string()).unwrap();
+        assert_eq!(file_ids, vec!["file-1".to_string()]);
+    }
+
+    #[test]
+    fn test_symbol_with_file_index() {
+        let temp_dir = TempDir::new().unwrap();
+        let project_path = temp_dir.path();
+        let storage = StorageManager::open_project_db(project_path).unwrap();
+
+        let symbol = Symbol {
+            id: "sym-1".to_string(),
+            file_id: "file-1".to_string(),
+            name: "test_func".to_string(),
+            kind: crate::models::SymbolKind::Function,
+            start_line: 10,
+            end_line: 20,
+            doc_comment: None,
+            code: "fn test_func() {}".to_string(),
+            parent_id: None,
+        };
+
+        storage.store_symbol(&symbol).unwrap();
+
+        // Check file_symbols index
+        let symbol_ids = storage.get_file_symbols("file-1").unwrap();
+        assert_eq!(symbol_ids, vec!["sym-1".to_string()]);
+    }
+
+    #[test]
+    fn test_index_state() {
+        let temp_dir = TempDir::new().unwrap();
+        let project_path = temp_dir.path();
+        let storage = StorageManager::open_project_db(project_path).unwrap();
+
+        // Initially no state
+        assert!(storage.get_index_state("test-id").unwrap().is_none());
+
+        // Set state
+        storage.set_index_state("test-id", "hashed").unwrap();
+        assert_eq!(storage.get_index_state("test-id").unwrap(), Some("hashed".to_string()));
+    }
+
+    #[test]
+    fn test_file_commits_index() {
+        let temp_dir = TempDir::new().unwrap();
+        let project_path = temp_dir.path();
+        let storage = StorageManager::open_project_db(project_path).unwrap();
+
+        let diff = GitDiff {
+            id: "diff-1".to_string(),
+            commit_id: "commit-1".to_string(),
+            project_path: project_path.display().to_string(),
+            file_path: "src/main.rs".to_string(),
+            old_oid: None,
+            new_oid: None,
+            change_type: ChangeType::Modified,
+            diff_content: "".to_string(),
+            diff_summary: "".to_string(),
+            added_lines: 0,
+            removed_lines: 0,
+            insertions: 0,
+            deletions: 0,
+            timestamp: Utc::now(),
+        };
+
+        storage.store_diff(&diff).unwrap();
+
+        // Check file_commits index
+        let commit_ids = storage.get_file_commits(&project_path.display().to_string(), "src/main.rs").unwrap();
+        assert_eq!(commit_ids, vec!["commit-1".to_string()]);
     }
 }
