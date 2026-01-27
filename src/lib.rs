@@ -30,3 +30,4 @@ pub mod models;
 
 pub use config::EmbeddingConfig;
 pub use error::{Result, RagError};
+pub use parser::{ParsedSession, SessionParser};
