@@ -1,16 +1,7 @@
 /target
 
 # Ralph runtime files
-.ralph/.call_count
-.ralph/.circuit_breaker_history
-.ralph/.circuit_breaker_state
-.ralph/.exit_signals
-.ralph/.last_reset
-.ralph/.ralph_session
-.ralph/.ralph_session_history
-.ralph/progress.json
-.ralph/status.json
-.ralph/logs/
+.ralph/
 
 # RAG data directories
 .rag/

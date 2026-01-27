@@ -1,6 +1,63 @@
 [package]
 name = "claude-rag"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
+description = "Claude Code Interaction History & Knowledge Base Tool"
+license = "MIT"
+repository = "https://github.com/yourusername/claude-rag"
 
 [dependencies]
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# HTTP client
+reqwest = { version = "0.12", features = ["json"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Error handling
+anyhow = "1"
+thiserror = "1"
+
+# Database
+sled = "0.34"
+
+# File monitoring
+notify = "6"
+
+# Git integration
+git2 = "0.18"
+
+# Paths and file handling
+dirs = "5"
+walkdir = "2"
+ignore = "0.4"
+
+# Tree-sitter for AST parsing
+tree-sitter = "0.22"
+tree-sitter-rust = "0.21"
+tree-sitter-python = "0.21"
+tree-sitter-javascript = "0.21"
+tree-sitter-typescript = "0.21"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Date/time handling
+chrono = { version = "0.4", features = ["serde"] }
+
+[dev-dependencies]
+tempfile = "3"
+criterion = "0.5"
+proptest = "1"
+
+[[bench]]
+name = "hnsw_bench"
+harness = false
