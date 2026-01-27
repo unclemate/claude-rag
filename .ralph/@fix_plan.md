@@ -116,12 +116,12 @@
 - [ ] Add BREAKING CHANGE extraction
 
 ### 2.3 Parser Module (`src/parser.rs`)
-- [ ] Implement `scan_claude_projects()` - Find all projects
-- [ ] Implement `parse_sessions_index()` - Read metadata
-- [ ] Implement `parse_jsonl_file()` - Parse session files
-- [ ] Implement incremental parsing support
-- [ ] Add error handling for malformed JSONL
-- [ ] Add tests with sample data
+- [x] Implement `scan_claude_projects()` - Find all projects
+- [x] Implement `parse_sessions_index()` - Read metadata
+- [x] Implement `parse_jsonl_file()` - Parse session files
+- [x] Implement incremental parsing support
+- [x] Add error handling for malformed JSONL
+- [x] Add tests with sample data
 
 ---
 
@@ -189,11 +189,11 @@
 ## Phase 5: File Scanning & Parsing
 
 ### 5.1 File Scanner (`src/scanner.rs`)
-- [ ] Implement `.gitignore` parsing (use ignore crate)
-- [ ] Implement file classification (source/doc/other)
-- [ ] Implement change detection (mtime + hash)
-- [ ] Implement incremental scanning
-- [ ] Add tests
+- [x] Implement `.gitignore` parsing (use ignore crate)
+- [x] Implement file classification (source/doc/other)
+- [x] Implement change detection (mtime + hash)
+- [x] Implement incremental scanning
+- [x] Add tests
 
 ### 5.2 AST Parser (`src/ast.rs`)
 - [ ] Set up Tree-sitter for multiple languages
@@ -218,14 +218,14 @@
 ## Phase 5a: Git History Collection ⭐
 
 ### 5a.1 Git Collector (`src/collector/git.rs`)
-- [ ] Define `GitCollector` struct using git2
-- [ ] Implement `new(project_path)` - Open repository
-- [ ] Implement `collect_all_commits()` - Get commit history
-- [ ] Implement `get_file_diff()` - Extract diffs
-- [ ] Implement `parse_conventional_commits()` - Parse commit messages
-- [ ] Implement `extract_breaking_changes()` - Find BREAKING CHANGE
-- [ ] Add error handling for non-Git projects
-- [ ] Add tests with test repositories
+- [x] Define `GitCollector` struct using git2
+- [x] Implement `new(project_path)` - Open repository
+- [x] Implement `collect_all_commits()` - Get commit history
+- [x] Implement `get_file_diffs()` - Extract diffs
+- [x] Implement `parse_conventional_commit()` - Parse commit messages
+- [x] Implement `extract_breaking_changes()` - Find BREAKING CHANGE
+- [x] Add error handling for non-Git projects
+- [x] Add tests with test repositories
 
 ### 5a.2 Git Integration with Storage
 - [ ] Extend `StorageManager` with Git operations

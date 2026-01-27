@@ -7,7 +7,7 @@ use std::path::Path;
 use std::collections::{HashMap, HashSet};
 use serde::{Deserialize, Serialize, Serializer, Deserializer};
 
-use crate::error::{Result, RagError};
+use crate::error::Result;
 use crate::models::ContentType;
 
 /// HNSW index node.

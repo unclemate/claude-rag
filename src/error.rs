@@ -2,7 +2,6 @@
 //!
 //! Uses `thiserror` for structured error definitions and `anyhow` for application context.
 
-use std::path::PathBuf;
 use thiserror::Error;
 
 /// Centralized error type for the application.

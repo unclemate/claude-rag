@@ -5,7 +5,6 @@ use std::path::Path;
 
 use crate::error::{Result, RagError};
 use crate::models::{Commit, File, GitDiff, Message, Session, Symbol};
-use crate::models::diff::ChangeType;
 
 /// Storage manager for project data.
 pub struct StorageManager {
@@ -295,6 +294,7 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
     use chrono::Utc;
+    use crate::models::diff::ChangeType;
 
     #[test]
     fn test_storage_manager_open() {

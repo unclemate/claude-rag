@@ -1,7 +1,6 @@
 //! Symbol model for code-level indexing.
 
 use serde::{Deserialize, Serialize};
-use chrono::{DateTime, Utc};
 
 /// Kind of code symbol.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
