@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 use crate::error::{Result, RagError};
+use crate::progress::ProgressStyle;
 
 /// Global configuration path.
 const GLOBAL_CONFIG_PATH: &str = ".claude/rag/config.toml";
@@ -31,6 +32,11 @@ pub struct Config {
     pub confidence: ConfidenceConfig,
     /// Retrieval options.
     pub retrieval: RetrievalConfig,
+    /// Logging configuration.
+    pub logging: LoggingConfig,
+    /// Progress display configuration.
+    #[serde(default)]
+    pub progress: ProgressConfig,
 }
 
 /// Embedding API configuration.
@@ -217,6 +223,70 @@ impl Default for RetrievalConfig {
     }
 }
 
+/// Logging configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LoggingConfig {
+    /// Log level: trace, debug, info, warn, error
+    #[serde(default = "default_log_level")]
+    pub level: String,
+    /// Enable file logging to .rag/logs/
+    #[serde(default = "default_enable_file_logging")]
+    pub enable_file_logging: bool,
+    /// Use JSON format for file logs
+    #[serde(default = "default_json_format")]
+    pub json_format: bool,
+    /// Include span events for async call chain tracking
+    #[serde(default)]
+    pub include_spans: bool,
+    /// Enable daily log rotation
+    #[serde(default = "default_daily_rotation")]
+    pub daily_rotation: bool,
+}
+
+fn default_log_level() -> String {
+    "info".to_string()
+}
+
+fn default_enable_file_logging() -> bool {
+    true
+}
+
+fn default_json_format() -> bool {
+    true
+}
+
+fn default_daily_rotation() -> bool {
+    true
+}
+
+impl Default for LoggingConfig {
+    fn default() -> Self {
+        Self {
+            level: default_log_level(),
+            enable_file_logging: default_enable_file_logging(),
+            json_format: default_json_format(),
+            include_spans: false,
+            daily_rotation: default_daily_rotation(),
+        }
+    }
+}
+
+/// Progress display configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProgressConfig {
+    /// Progress style (default, compact, silent).
+    #[serde(default)]
+    pub style: ProgressStyle,
+}
+
+impl Default for ProgressConfig {
+    fn default() -> Self {
+        Self {
+            style: ProgressStyle::default(),
+        }
+    }
+}
+
 /// Configuration manager.
 pub struct ConfigManager;
 
@@ -291,6 +361,8 @@ impl ConfigManager {
         global.git = project.git;
         global.confidence = project.confidence;
         global.retrieval = project.retrieval;
+        global.logging = project.logging;
+        global.progress = project.progress;
     }
 
     /// Validate required configuration fields.

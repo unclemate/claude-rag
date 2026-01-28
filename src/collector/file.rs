@@ -3,6 +3,7 @@
 use crate::document::DocumentParser;
 use crate::error::{RagError, Result};
 use crate::models::File;
+use crate::progress::ProgressReporter;
 use crate::scanner::FileScanner;
 use crate::storage::sled::StorageManager;
 use sha2::{Digest, Sha256};
@@ -284,6 +285,75 @@ impl FileCollector {
                 }
             }
         }
+
+        Ok(stats)
+    }
+
+    /// Store collected files to storage with progress reporting.
+    ///
+    /// # Arguments
+    /// * `files` - Files to store
+    /// * `storage` - Storage manager
+    /// * `reporter` - Progress reporter
+    ///
+    /// # Returns
+    /// * `CollectionStats` - Collection statistics
+    pub fn store_files_with_progress(
+        &self,
+        files: &[File],
+        storage: &StorageManager,
+        reporter: &dyn ProgressReporter,
+    ) -> Result<CollectionStats> {
+        use crate::progress::ProgressEvent;
+
+        let stats = CollectionStats {
+            files_scanned: files.len(),
+            ..Default::default()
+        };
+
+        // Report phase started
+        reporter.report(ProgressEvent::PhaseStarted {
+            name: "files".to_string(),
+            total: files.len(),
+        });
+
+        for (i, file) in files.iter().enumerate() {
+            // Report progress
+            reporter.report(ProgressEvent::ItemProgress {
+                current: i + 1,
+                total: files.len(),
+                name: file.file_path.clone(),
+            });
+
+            match storage.store_file(file) {
+                Ok(_) => {
+                    reporter.report(ProgressEvent::ItemCompleted {
+                        name: file.file_path.clone(),
+                        success: true,
+                    });
+                }
+                Err(e) => {
+                    warn!(
+                        file_path = %file.file_path,
+                        error = %e,
+                        "Error storing file"
+                    );
+                    reporter.report(ProgressEvent::ItemCompleted {
+                        name: file.file_path.clone(),
+                        success: false,
+                    });
+                    reporter.report(ProgressEvent::Error {
+                        message: format!("Failed to store {}: {}", file.file_path, e),
+                    });
+                }
+            }
+        }
+
+        // Report phase completed
+        reporter.report(ProgressEvent::PhaseCompleted {
+            name: "files".to_string(),
+            duration_secs: 0.0, // Duration will be tracked by the reporter stats
+        });
 
         Ok(stats)
     }

@@ -4,6 +4,7 @@ use crate::collector::file::{CollectionStats as FileCollectionStats, FileCollect
 use crate::collector::session::{SessionCollectionStats, SessionCollector};
 use crate::config::{Config, ConfigManager};
 use crate::error::{Result, RagError};
+use crate::progress::ProgressReporter;
 use crate::storage::sled::StorageManager;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -95,14 +96,14 @@ pub struct IndexResult {
 /// # Arguments
 /// * `project_path` - Path to the project directory
 /// * `options` - Index options
-/// * `progress` - Optional progress callback
+/// * `progress` - Optional progress reporter (accepts both old-style callbacks and new ProgressReporter)
 ///
 /// # Returns
 /// * `Result<IndexResult>` - Index result
 pub fn index_project(
     project_path: &Path,
     options: IndexOptions,
-    progress: Option<&dyn Fn(&str)>,
+    progress: Option<&dyn ProgressReporter>,
 ) -> Result<IndexResult> {
     // Open storage
     let storage = StorageManager::open_project_db(project_path)?;
@@ -113,10 +114,6 @@ pub fn index_project(
 
     // Index files
     if options.index_source || options.index_docs || options.index_other {
-        if let Some(p) = progress {
-            p("Scanning files...");
-        }
-
         let collector = FileCollector::new(project_path)?;
 
         let (files, _deleted) = if options.force {
@@ -128,25 +125,16 @@ pub fn index_project(
             collector.collect_incremental(&storage, options.index_source, options.index_docs, options.index_other)?
         };
 
-        if let Some(p) = progress {
-            p(&format!("Found {} files to index", files.len()));
-        }
-
-        // Store files
-        let stats = collector.store_files(&files, &storage)?;
-        file_stats = stats.clone();
-
-        if let Some(p) = progress {
-            p(&format!("Indexed {} files", stats.files_collected));
+        // Store files with progress if reporter provided, otherwise use simple method
+        if let Some(reporter) = progress {
+            file_stats = collector.store_files_with_progress(&files, &storage, reporter)?;
+        } else {
+            file_stats = collector.store_files(&files, &storage)?;
         }
     }
 
     // Index sessions
     if options.index_sessions {
-        if let Some(p) = progress {
-            p("Scanning sessions...");
-        }
-
         let collector = SessionCollector::new(None).with_project(project_path);
 
         let sessions = if options.force {
@@ -155,16 +143,11 @@ pub fn index_project(
             collector.collect_incremental(&storage)?
         };
 
-        if let Some(p) = progress {
-            p(&format!("Found {} sessions to index", sessions.len()));
-        }
-
-        // Store sessions
-        let stats = collector.store_sessions(&sessions, &storage)?;
-        session_stats = stats.clone();
-
-        if let Some(p) = progress {
-            p(&format!("Indexed {} sessions", stats.sessions_collected));
+        // Store sessions with progress if reporter provided, otherwise use simple method
+        if let Some(reporter) = progress {
+            session_stats = collector.store_sessions_with_progress(&sessions, &storage, reporter)?;
+        } else {
+            session_stats = collector.store_sessions(&sessions, &storage)?;
         }
     }
 

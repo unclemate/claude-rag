@@ -2,6 +2,7 @@
 
 use crate::error::{RagError, Result};
 use crate::parser::{ParsedSession, SessionParser};
+use crate::progress::ProgressReporter;
 use crate::storage::sled::StorageManager;
 use chrono::{DateTime, Utc};
 use std::path::{Path, PathBuf};
@@ -207,6 +208,99 @@ impl SessionCollector {
             // Mark as indexed
             let _ = storage.set_index_state(&parsed.session.id, &Utc::now().to_rfc3339());
         }
+
+        Ok(stats)
+    }
+
+    /// Store collected sessions to storage with progress reporting.
+    ///
+    /// # Arguments
+    /// * `sessions` - Sessions to store
+    /// * `storage` - Storage manager
+    /// * `reporter` - Progress reporter
+    ///
+    /// # Returns
+    /// * `SessionCollectionStats` - Collection statistics
+    pub fn store_sessions_with_progress(
+        &self,
+        sessions: &[ParsedSession],
+        storage: &StorageManager,
+        reporter: &dyn ProgressReporter,
+    ) -> Result<SessionCollectionStats> {
+        use crate::progress::ProgressEvent;
+
+        let stats = SessionCollectionStats {
+            sessions_scanned: sessions.len(),
+            ..Default::default()
+        };
+
+        // Report phase started
+        reporter.report(ProgressEvent::PhaseStarted {
+            name: "sessions".to_string(),
+            total: sessions.len(),
+        });
+
+        for (i, parsed) in sessions.iter().enumerate() {
+            // Report progress
+            reporter.report(ProgressEvent::ItemProgress {
+                current: i + 1,
+                total: sessions.len(),
+                name: parsed.session.title.clone().unwrap_or_else(|| parsed.session.id.clone()),
+            });
+
+            // Store session
+            match storage.store_session(&parsed.session) {
+                Ok(_) => {
+                    reporter.report(ProgressEvent::ItemCompleted {
+                        name: parsed.session.id.clone(),
+                        success: true,
+                    });
+                }
+                Err(e) => {
+                    warn!(
+                        session_id = %parsed.session.id,
+                        error = %e,
+                        "Error storing session"
+                    );
+                    reporter.report(ProgressEvent::ItemCompleted {
+                        name: parsed.session.id.clone(),
+                        success: false,
+                    });
+                    reporter.report(ProgressEvent::Error {
+                        message: format!("Failed to store session {}: {}", parsed.session.id, e),
+                    });
+                    continue;
+                }
+            }
+
+            // Store messages
+            for message in &parsed.messages {
+                match storage.store_message(message) {
+                    Ok(_) => {
+                        // Message storage success
+                    }
+                    Err(e) => {
+                        warn!(
+                            message_id = %message.id,
+                            error = %e,
+                            "Error storing message"
+                        );
+                        reporter.report(ProgressEvent::Error {
+                            message: format!("Failed to store message {}: {}", message.id, e),
+                        });
+                    }
+                }
+            }
+
+            // Mark as indexed
+            let _ = storage.set_index_state(&parsed.session.id, &Utc::now().to_rfc3339());
+        }
+
+        // Report phase completed
+        reporter.report(ProgressEvent::PhaseCompleted {
+            name: "sessions".to_string(),
+            duration_secs: 0.0,
+        });
 
         Ok(stats)
     }

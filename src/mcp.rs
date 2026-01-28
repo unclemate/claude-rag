@@ -1412,6 +1412,21 @@ mod tests {
             "retrieval": {
                 "enable_timeline": true,
                 "show_git_context": true
+            },
+            "logging": {
+                "level": "info",
+                "enable_file_logging": false,
+                "json_format": false,
+                "include_spans": false,
+                "daily_rotation": true
+            },
+            "progress": {
+                "style": {
+                    "style_type": "default",
+                    "show_cache_stats": true,
+                    "show_processing_rate": true,
+                    "show_eta": true
+                }
             }
         }"#.to_string()
     }

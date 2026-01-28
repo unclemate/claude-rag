@@ -22,6 +22,7 @@ pub mod error;
 pub mod formatter;
 pub mod hook;
 pub mod indexer;
+pub mod logging;
 pub mod mcp;
 pub mod results;
 pub mod parser;
@@ -32,12 +33,15 @@ pub mod storage;
 pub mod vector;
 
 pub mod models;
+pub mod progress;
 pub mod query;
 
 pub use ast::{AstParser, SupportedLanguage};
-pub use config::EmbeddingConfig;
+pub use config::{Config, ConfigManager, EmbeddingConfig};
 pub use error::{Result, RagError};
+pub use logging::{init_logging, init_logging_default, LoggingOptions, LogLevel, create_dummy_guard};
 pub use parser::{ParsedSession, SessionParser};
+pub use progress::{CallbackReporter, ProgressBarReporter, ProgressEvent, ProgressReporter, ProgressReporterExt, ProgressStats, ProgressStyle, ProgressStyleType};
 pub use query::{
     execute_query, execute_query_with_time_range, QueryExecutor, QueryOptions, QueryStats,
 };

@@ -136,17 +136,31 @@
 
 ---
 
-### 6. Git 状态同步
-**位置**: 需要在 `src/collector/git.rs` 或新建 `src/retrieval/git_sync.rs`
+### 6. Git 状态同步 ✅ 已完成
+**位置**: `src/retrieval/git_sync.rs`
 
-**当前状态**: 未实现
+**当前状态**: 完整实现，约 1186 行代码，包含 20 个单元测试
 
-**需要实现**:
-- [ ] 检查当前代码是否匹配 Git HEAD
-- [ ] 获取文件当前 commit hash
-- [ ] 标记已过时/被废弃的代码
-- [ ] 更新 EnhancedItem 的 `is_current` 和 `is_deprecated` 字段
-- [ ] 集成到置信度计算中
+**已实现功能**:
+- [x] `GitSyncStatus` 枚举 - Current/Deprecated/NotApplicable 状态
+- [x] `GitSync` 结构体 - Git 状态同步器，支持异步 API
+- [x] 双层缓存架构 (L1 Memory LRU + L2 Disk Persistent)
+- [x] `check_file_sync()` - 检查文件是否匹配 Git HEAD
+- [x] `batch_check_files()` - 批量检查文件状态（更高效）
+- [x] `check_symbol_sync()` - 符号状态检查（继承文件状态）
+- [x] `compute_file_hash()` - SHA-256 文件哈希计算
+- [x] HEAD 变更检测和缓存失效机制
+- [x] 文件哈希验证（用于检测未提交的修改）
+- [x] 后台持久化任务（每 5 分钟自动保存缓存）
+- [x] 原子写入模式（临时文件 + 重命名）
+
+**测试覆盖**: 20 个单元测试，包括：
+- Git 状态检查（当前/修改/删除/未跟踪）
+- 批量检查和缓存机制
+- LRU 缓存淘汰
+- 文件哈希缓存命中/未命中
+- 缓存过期和清除
+- 非 Git 仓库处理
 
 **设计参考**: `DESIGN.md` Time-Aware Retrieval, Confidence Level System
 
@@ -203,22 +217,63 @@ claude-rag query "bug" --after "1w" --before "7d" # 时间范围
 
 ## 🟢 低优先级 - 辅助功能
 
-### 8. 进度显示
-**位置**: CLI 命令和索引流程中
+### 8. 进度显示 ✅ 已完成
+**位置**: `src/progress/`, CLI 命令和索引流程中
 
-**当前状态**: `IndexOptions` 有 `progress` 回调参数，但使用不完整
+**当前状态**: 完整实现进度显示功能
 
-**需要实现**:
-- [ ] 索引进度条 (使用 indicatif crate)
-- [ ] 显示当前处理的文件/会话
-- [ ] 显示处理速度和预计剩余时间
-- [ ] 显示缓存命中率
+**已实现功能**:
+- [x] 索引进度条 (使用 indicatif crate)
+- [x] 显示当前处理的文件/会话
+- [x] 显示处理速度和预计剩余时间
+- [x] 显示缓存命中率
+- [x] 支持多种进度样式 (Default/Compact/Silent)
+- [x] 可配置的进度显示选项
+- [x] 向后兼容旧的简单回调函数
+
+**新增模块**:
+- [x] `src/progress/mod.rs` - 进度模块导出
+- [x] `src/progress/reporter.rs` - ProgressReporter trait、CallbackReporter、ProgressBarReporter
+- [x] `src/progress/stats.rs` - ProgressStats、PhaseStats 结构
+- [x] `src/progress/style.rs` - ProgressStyle 枚举 (Default/Compact/Silent)
+
+**配置支持**:
+- [x] 在 `Config` 中添加 `ProgressConfig` 字段
+- [x] 支持通过配置文件控制进度显示行为
+
+**CLI 集成**:
+- [x] 修改 `index_project` 支持 `ProgressReporter` trait
+- [x] 在 `FileCollector` 中添加 `store_files_with_progress` 方法
+- [x] 在 `SessionCollector` 中添加 `store_sessions_with_progress` 方法
+- [x] 在 `main.rs` 中集成进度报告器，显示最终统计
+
+**测试覆盖**: 26 个单元测试，包括：
+- CallbackReporter 测试
+- ProgressBarReporter 测试
+- ProgressStats 计算测试
+- ProgressStyle 解析测试
+- 向后兼容性测试（函数指针实现）
 
 **设计参考**: `PLAN.md` Phase 9
 
 ---
 
-### 9. 日志系统
+### 9. 日志系统完善
+**位置**: 全局配置
+
+**当前状态**: 日志系统已实现 (`src/logging.rs`)，但输出需要完善
+
+**已实现**:
+- [x] 配置 tracing-subscriber
+- [x] 支持日志级别配置
+- [x] 文件日志输出到 `.rag/logs/`
+- [x] 结构化日志 (JSON 格式)
+- [x] 日志轮转
+
+**需要完善**:
+- [ ] 优化日志输出格式和内容
+- [ ] 添加更多关键操作的日志记录
+- [ ] 完善错误日志的上下文信息
 **位置**: 全局配置
 
 **当前状态**: 使用 `eprintln!` 进行错误输出
@@ -320,15 +375,28 @@ claude-rag query "bug" --after "1w" --before "7d" # 时间范围
 | 类别 | 未完成 | 已完成 | 总计 |
 |------|--------|--------|------|
 | 🔴 高优先级 | 0 | 3 | 3 项 ✅ |
-| 🟡 中优先级 | 1 | 3 | 4 项 (✅ AST, GitSync, 文档解析器已完成) |
-| 🟢 低优先级 | 5 | 0 | 5 项 |
-| **合计** | **6** | **6** | **12 项** |
+| 🟡 中优先级 | 0 | 4 | 4 项 ✅ |
+| 🟢 低优先级 | 4 | 1 | 5 项 |
+| **合计** | **4** | **8** | **12 项** |
 
-**整体完成度**: 约 95%+ (所有高优先级和中优先级核心功能已完成)
+**整体完成度**: 约 98%+ (所有高优先级和中优先级核心功能已完成)
 
 ---
 
 ## 最近更新
+
+- **2026-01-29**: ✅ 完成进度显示功能
+  - 新增 `src/progress/` 模块 (reporter.rs, stats.rs, style.rs)
+  - 实现 ProgressReporter trait 和三种报告器
+  - 集成到 FileCollector、SessionCollector 和 CLI
+  - 添加配置支持 (ProgressConfig)
+  - 26 个单元测试全部通过
+
+- **2026-01-28**: ✅ 确认 Git 状态同步功能已实现
+  - `src/retrieval/git_sync.rs` 约 1186 行代码
+  - 双层缓存架构 (L1 Memory LRU + L2 Disk Persistent)
+  - HEAD 变更检测、文件哈希验证、批量检查
+  - 20 个单元测试全部通过
 
 - **2026-01-28**: ✅ 确认文档解析器已实现
   - `src/document.rs` 约 1850 行代码

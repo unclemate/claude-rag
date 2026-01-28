@@ -3,6 +3,9 @@
 use clap::{Parser, Subcommand};
 use anyhow::Result;
 
+// Import the ProgressReporter trait so its methods are available
+use claude_rag::ProgressReporter;
+
 #[derive(Parser)]
 #[command(name = "claude-rag")]
 #[command(about = "Claude Code Interaction History & Knowledge Base Tool", long_about = None)]
@@ -98,6 +101,23 @@ enum DaemonCommands {
 async fn main() -> Result<()> {
     let cli = Cli::parse();
 
+    // 初始化日志系统（必须在最开始）
+    let project_path = std::env::current_dir()
+        .map_err(|e| anyhow::anyhow!("Failed to get current directory: {}", e))?;
+
+    // 日志初始化失败时仅警告，不影响程序运行
+    let _log_guard = match claude_rag::logging::init_logging_default(&project_path) {
+        Ok(guard) => {
+            tracing::info!("Logging system initialized");
+            guard
+        }
+        Err(e) => {
+            eprintln!("Warning: Failed to initialize logging: {}", e);
+            // 使用导出的 dummy guard 保持类型一致
+            claude_rag::create_dummy_guard()
+        }
+    };
+
     match cli.command {
         Commands::Init { force } => {
             handle_init(force)?;
@@ -157,8 +177,6 @@ fn handle_init(force: bool) -> Result<()> {
 }
 
 fn handle_index(_all: bool, _project: Option<String>, force: bool, r#type: Option<String>) -> Result<()> {
-    println!("Indexing...");
-
     let current_dir = std::env::current_dir()
         .map_err(|e| anyhow::anyhow!("Failed to get current directory: {}", e))?;
 
@@ -175,16 +193,42 @@ fn handle_index(_all: bool, _project: Option<String>, force: bool, r#type: Optio
         force,
     };
 
-    // Progress callback
-    let progress = |msg: &str| {
-        println!("  {}", msg);
+    // Load config to get progress style
+    let config = match claude_rag::ConfigManager::load(Some(&current_dir)) {
+        Ok(config) => config,
+        Err(e) => {
+            eprintln!("Warning: Failed to load config, using defaults: {}", e);
+            eprintln!("  Run 'claude-rag init' to create a configuration file");
+            claude_rag::Config::default()
+        }
     };
 
-    match claude_rag::cli::index_project(&current_dir, options, Some(&progress)) {
+    // Create progress reporter with configured style
+    let reporter = claude_rag::ProgressBarReporter::new(config.progress.style.clone());
+
+    match claude_rag::cli::index_project(&current_dir, options, Some(&reporter)) {
         Ok(result) => {
+            reporter.finish();
+
             println!("✓ Indexing complete");
             println!("  Files indexed: {}", result.file_stats.files_collected);
             println!("  Sessions indexed: {}", result.session_stats.sessions_collected);
+
+            // Show cache hit rate if available and enabled
+            let stats = reporter.stats();
+            if config.progress.style.show_cache_stats {
+                if let Some(rate) = stats.cache_hit_rate() {
+                    println!("  Cache hit rate: {:.1}%", rate * 100.0);
+                }
+            }
+
+            // Show processing rate if available and enabled
+            if config.progress.style.show_processing_rate {
+                if let Some(rate) = stats.processing_rate() {
+                    println!("  Processing rate: {:.1} items/sec", rate);
+                }
+            }
+
             if result.errors > 0 {
                 println!("  Errors: {}", result.errors);
             }
