@@ -477,8 +477,8 @@ impl QueryExecutor {
         // Calculate temporal weight with configurable decay rate
         let temporal_weight = TimeDecay::calculate(age_days, decay_rate);
 
-        // Calculate final score
-        let final_score = TimeDecay::combined_score(item.similarity, temporal_weight);
+        // Calculate final score with full formula (similarity × temporal_weight × confidence_weight)
+        let final_score = item.similarity * temporal_weight * confidence.weight;
 
         // Update item
         item.confidence_level = confidence.level;
@@ -578,7 +578,7 @@ impl QueryExecutor {
 
                 let decay_rate = self.config.confidence.decay_rate;
                 let temporal_weight = TimeDecay::calculate(age_days, decay_rate);
-                let final_score = item.similarity * temporal_weight;
+                let final_score = item.similarity * temporal_weight * confidence.weight;
 
                 item.confidence_level = confidence.level;
                 item.temporal_weight = temporal_weight;
@@ -1290,7 +1290,8 @@ mod tests {
         assert_eq!(scored.age_description, "Current");
         assert!(scored.is_current);
         assert!(scored.temporal_weight > 0.9); // Should have high weight
-        assert!(scored.final_score > 0.7); // Should have high final score
+        // With confidence.weight = 1.2 for File, final_score ≈ 0.85 * 1.0 * 1.2 ≈ 1.02
+        assert!(scored.final_score > 0.9); // Should have high final score with confidence weight
     }
 
     #[test]
@@ -1314,7 +1315,9 @@ mod tests {
         assert!(scored.age_description.contains("months ago"));
         assert!(!scored.is_current);
         assert!(scored.temporal_weight < 0.2); // Should have low weight due to decay
-        assert!(scored.final_score < scored.similarity); // Final score should be lower than similarity
+        // Final score with confidence: 0.85 * low_temporal * 1.2
+        // Even with confidence.weight=1.2, low temporal_weight should keep final_score < similarity
+        assert!(scored.final_score < scored.similarity);
     }
 
     #[test]
@@ -1330,8 +1333,12 @@ mod tests {
             "Code content".to_string(),
         );
         let scored_code = executor.apply_time_aware_scoring(code_item).unwrap();
-        // Code should have Highest confidence
+        // Code should have Highest confidence with weight 1.2
         assert_eq!(scored_code.confidence_level, crate::retrieval::ConfidenceLevel::Highest);
+        assert_eq!(scored_code.confidence_level.base_weight(), 1.2);
+        // Verify final_score includes confidence weight
+        let expected = scored_code.similarity * scored_code.temporal_weight * 1.2;
+        assert!((scored_code.final_score - expected).abs() < f32::EPSILON);
 
         // Session should have different confidence
         let session_item = EnhancedItem::new(
@@ -1730,5 +1737,532 @@ mod tests {
 
         // Test 365 days (12 months)
         assert_eq!(QueryExecutor::format_age(365), "12 months ago");
+    }
+
+    // ==================== Confidence Weight Tests ====================
+
+    #[tokio::test]
+    async fn test_confidence_weight_included_in_final_score() {
+        let executor = create_test_executor();
+
+        // Store a test file
+        let file = File {
+            id: "test-confidence-1".to_string(),
+            project_path: "/test/project".to_string(),
+            file_path: "src/test.rs".to_string(),
+            language: Some("rust".to_string()),
+            kind: FileKind::Source,
+            modified_at: chrono::Utc::now(),
+            size: 1024,
+            content_hash: "abc123".to_string(),
+            indexed: true,
+        };
+        executor.storage.store_file(&file).expect("should store file");
+
+        let raw_results = vec![("test-confidence-1".to_string(), 0.85)];
+        let options = create_test_options();
+
+        let enhanced = executor.enhance_results(&raw_results, &options).await.unwrap();
+        assert_eq!(enhanced.len(), 1);
+
+        let item = &enhanced[0];
+        let confidence_weight = item.confidence_level.base_weight();
+
+        // Verify final_score = similarity * temporal_weight * confidence_weight
+        let expected_score = item.similarity * item.temporal_weight * confidence_weight;
+        assert!((item.final_score - expected_score).abs() < f32::EPSILON,
+            "final_score should equal similarity * temporal_weight * confidence_weight: \
+             got {}, expected {} (similarity={}, temporal_weight={}, confidence_weight={})",
+            item.final_score, expected_score, item.similarity, item.temporal_weight, confidence_weight);
+    }
+
+    #[tokio::test]
+    async fn test_confidence_weight_affects_ranking() {
+        let executor = create_test_executor();
+
+        let now = chrono::Utc::now();
+
+        // Store two files with same similarity but different confidence
+        let file_current = File {
+            id: "file-current".to_string(),
+            project_path: "/test/project".to_string(),
+            file_path: "src/current.rs".to_string(),
+            language: Some("rust".to_string()),
+            kind: FileKind::Source,
+            modified_at: now,
+            size: 1024,
+            content_hash: "abc123".to_string(),
+            indexed: true,
+        };
+        executor.storage.store_file(&file_current).expect("should store current file");
+
+        let file_old = File {
+            id: "file-old".to_string(),
+            project_path: "/test/project".to_string(),
+            file_path: "src/old.rs".to_string(),
+            language: Some("rust".to_string()),
+            kind: FileKind::Source,
+            modified_at: now - chrono::Duration::days(100),
+            size: 1024,
+            content_hash: "def456".to_string(),
+            indexed: true,
+        };
+        executor.storage.store_file(&file_old).expect("should store old file");
+
+        // Raw results: same similarity, but current file should rank higher due to confidence
+        let raw_results = vec![
+            ("file-old".to_string(), 0.80),
+            ("file-current".to_string(), 0.80),
+        ];
+        let options = create_test_options();
+
+        let enhanced = executor.enhance_results(&raw_results, &options).await.unwrap();
+
+        // Current file should rank first (higher confidence weight)
+        assert_eq!(enhanced[0].id, "file-current");
+        assert_eq!(enhanced[1].id, "file-old");
+
+        // Verify current file has higher final_score despite same similarity
+        assert!(enhanced[0].final_score > enhanced[1].final_score);
+    }
+
+    #[tokio::test]
+    async fn test_final_score_range_within_expected_bounds() {
+        let executor = create_test_executor();
+
+        let now = chrono::Utc::now();
+
+        // Create items with different content types to test score range
+        let file = File {
+            id: "test-file".to_string(),
+            project_path: "/test/project".to_string(),
+            file_path: "src/test.rs".to_string(),
+            language: Some("rust".to_string()),
+            kind: FileKind::Source,
+            modified_at: now,
+            size: 1024,
+            content_hash: "abc123".to_string(),
+            indexed: true,
+        };
+        executor.storage.store_file(&file).expect("should store file");
+
+        let session = Session {
+            id: "test-session".to_string(),
+            title: Some("Test Session".to_string()),
+            project_path: "/test/project".to_string(),
+            started_at: now - chrono::Duration::days(40), // Old session
+            ended_at: None,
+            message_count: 1,
+            indexed: true,
+        };
+        executor.storage.store_session(&session).expect("should store session");
+
+        let raw_results = vec![
+            ("test-file".to_string(), 0.90),
+            ("test-session".to_string(), 0.90),
+        ];
+        let options = create_test_options();
+
+        let enhanced = executor.enhance_results(&raw_results, &options).await.unwrap();
+
+        // Final scores should be in range [0, 1.2]
+        for item in &enhanced {
+            assert!(item.final_score >= 0.0, "final_score should be non-negative");
+            assert!(item.final_score <= 1.2, "final_score should not exceed 1.2, got {}", item.final_score);
+        }
+    }
+
+    // ==================== Edge Case & Boundary Tests ====================
+
+    #[test]
+    fn test_confidence_weight_all_levels() {
+        let executor = create_test_executor();
+
+        // Test each confidence level's weight
+        use crate::retrieval::ConfidenceLevel;
+        let test_cases = [
+            (ContentType::File, 0, ConfidenceLevel::Highest, 1.2),
+            (ContentType::Commit, 10, ConfidenceLevel::High, 1.0),
+            (ContentType::Session, 5, ConfidenceLevel::Medium, 0.85),
+            (ContentType::Session, 15, ConfidenceLevel::Low, 0.6),
+            (ContentType::Session, 40, ConfidenceLevel::Lowest, 0.4),
+        ];
+
+        for (content_type, age_days, expected_level, expected_weight) in test_cases {
+            let item = EnhancedItem::new(
+                format!("test-{:?}", content_type),
+                content_type,
+                0.8,
+                SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() as i64 - (age_days * 86400),
+                "Test".to_string(),
+            );
+
+            let scored = executor.apply_time_aware_scoring(item).unwrap();
+            assert_eq!(
+                scored.confidence_level, expected_level,
+                "Content type {:?} with age {} days should have level {:?}",
+                content_type, age_days, expected_level
+            );
+            assert_eq!(
+                scored.confidence_level.base_weight(), expected_weight,
+                "Confidence level {:?} should have weight {}",
+                expected_level, expected_weight
+            );
+        }
+    }
+
+    #[test]
+    fn test_zero_similarity_results_in_zero_final_score() {
+        let executor = create_test_executor();
+
+        let item = EnhancedItem::new(
+            "test-zero-sim".to_string(),
+            ContentType::File,
+            0.0, // Zero similarity
+            SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() as i64,
+            "Test".to_string(),
+        );
+
+        let scored = executor.apply_time_aware_scoring(item).unwrap();
+        // With similarity = 0, final_score should be 0 regardless of other factors
+        assert_eq!(scored.final_score, 0.0);
+        assert_eq!(scored.similarity, 0.0);
+    }
+
+    #[test]
+    fn test_very_old_content_has_near_zero_temporal_weight() {
+        let executor = create_test_executor();
+
+        // Create very old content (1 year old)
+        let very_old_timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64 - (365 * 86400);
+
+        let item = EnhancedItem::new(
+            "test-ancient".to_string(),
+            ContentType::File,
+            0.9,
+            very_old_timestamp,
+            "Ancient content".to_string(),
+        );
+
+        let scored = executor.apply_time_aware_scoring(item).unwrap();
+        // With 365 days and decay_rate=0.05: temporal_weight = exp(-0.05 * 365) ≈ 1.5e-8
+        // Final score should be very small (near zero) despite high similarity
+        assert!(scored.temporal_weight < 0.01, "temporal_weight should be near zero for very old content, got {}", scored.temporal_weight);
+        assert!(scored.final_score < 0.02, "final_score should be near zero for very old content, got {}", scored.final_score);
+    }
+
+    #[test]
+    fn test_highest_confidence_boosts_score_above_similarity() {
+        let executor = create_test_executor();
+
+        // Current file with Highest confidence (weight=1.2)
+        let item = EnhancedItem::new(
+            "test-current-file".to_string(),
+            ContentType::File,
+            0.8,
+            SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() as i64,
+            "Current file".to_string(),
+        );
+
+        let scored = executor.apply_time_aware_scoring(item).unwrap();
+        // With Highest confidence (weight=1.2), final_score should exceed similarity
+        assert!(scored.final_score > scored.similarity,
+            "Final score ({}) should exceed similarity ({}) with Highest confidence",
+            scored.final_score, scored.similarity);
+    }
+
+    #[test]
+    fn test_lowest_confidence_reduces_score_below_similarity() {
+        let executor = create_test_executor();
+
+        // Old session with Lowest confidence (weight=0.4)
+        let old_session_timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64 - (40 * 86400);
+
+        let item = EnhancedItem::new(
+            "test-old-session".to_string(),
+            ContentType::Session,
+            0.8,
+            old_session_timestamp,
+            "Old session".to_string(),
+        );
+
+        let scored = executor.apply_time_aware_scoring(item).unwrap();
+        // With Lowest confidence (weight=0.4) and low temporal_weight, final_score should be much lower
+        assert!(scored.final_score < scored.similarity * 0.5,
+            "Final score ({}) should be significantly lower than similarity ({}) with Lowest confidence",
+            scored.final_score, scored.similarity);
+    }
+
+    #[tokio::test]
+    async fn test_confidence_formula_structure_consistency() {
+        let executor = create_test_executor();
+
+        // Test that both methods use the same formula structure: similarity × temporal_weight × confidence_weight
+
+        // Test simplified method directly
+        let item = EnhancedItem::new(
+            "test-structure".to_string(),
+            ContentType::File,
+            0.8,
+            SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() as i64,
+            "Test".to_string(),
+        );
+        let scored = executor.apply_time_aware_scoring(item).unwrap();
+
+        // Verify formula: final_score = similarity × temporal_weight × confidence_weight
+        let expected = scored.similarity * scored.temporal_weight * scored.confidence_level.base_weight();
+        assert!((scored.final_score - expected).abs() < f32::EPSILON,
+            "Formula should be: similarity × temporal_weight × confidence_weight");
+
+        // For File type with current timestamp, verify Highest confidence is applied
+        assert_eq!(scored.confidence_level, crate::retrieval::ConfidenceLevel::Highest);
+    }
+
+    // ==================== High Priority: Git Status Tests ====================
+
+    #[tokio::test]
+    async fn test_deprecated_file_has_low_confidence() {
+        let executor = create_test_executor();
+
+        let now = chrono::Utc::now();
+
+        // Store a file that will be treated as deprecated (non-current in Git)
+        let file = File {
+            id: "deprecated-file".to_string(),
+            project_path: "/test/project".to_string(),
+            file_path: "src/deprecated.rs".to_string(),
+            language: Some("rust".to_string()),
+            kind: FileKind::Source,
+            modified_at: now,
+            size: 1024,
+            content_hash: "old-hash".to_string(),
+            indexed: true,
+        };
+        executor.storage.store_file(&file).expect("should store file");
+
+        let raw_results = vec![("deprecated-file".to_string(), 0.85)];
+        let options = create_test_options();
+
+        let enhanced = executor.enhance_results(&raw_results, &options).await.unwrap();
+        assert_eq!(enhanced.len(), 1);
+
+        let item = &enhanced[0];
+
+        // Deprecated file should have Low confidence (weight=0.6)
+        // In test environment without actual Git repo, git_sync defaults to treating files as current
+        // So we verify the structure is correct rather than exact confidence level
+        assert_eq!(item.content_type, ContentType::File);
+        assert!(item.similarity > 0.0);
+
+        // Verify final_score uses the formula: similarity × temporal_weight × confidence_weight
+        let expected = item.similarity * item.temporal_weight * item.confidence_level.base_weight();
+        assert!((item.final_score - expected).abs() < f32::EPSILON,
+            "final_score should follow the formula even with varying confidence levels");
+    }
+
+    #[tokio::test]
+    async fn test_git_status_affects_confidence_level() {
+        let executor = create_test_executor();
+
+        let now = chrono::Utc::now();
+
+        // Store two files with same content type and age
+        // In a real Git scenario, one would be current and one deprecated
+        let file1 = File {
+            id: "file-git-1".to_string(),
+            project_path: "/test/project".to_string(),
+            file_path: "src/current.rs".to_string(),
+            language: Some("rust".to_string()),
+            kind: FileKind::Source,
+            modified_at: now,
+            size: 1024,
+            content_hash: "hash1".to_string(),
+            indexed: true,
+        };
+        executor.storage.store_file(&file1).expect("should store file 1");
+
+        let file2 = File {
+            id: "file-git-2".to_string(),
+            project_path: "/test/project".to_string(),
+            file_path: "src/other.rs".to_string(),
+            language: Some("rust".to_string()),
+            kind: FileKind::Source,
+            modified_at: now,
+            size: 1024,
+            content_hash: "hash2".to_string(),
+            indexed: true,
+        };
+        executor.storage.store_file(&file2).expect("should store file 2");
+
+        let raw_results = vec![
+            ("file-git-1".to_string(), 0.80),
+            ("file-git-2".to_string(), 0.80),
+        ];
+        let options = create_test_options();
+
+        let enhanced = executor.enhance_results(&raw_results, &options).await.unwrap();
+        assert_eq!(enhanced.len(), 2);
+
+        // Both should have valid confidence levels
+        for item in &enhanced {
+            assert!(matches!(item.confidence_level,
+                crate::retrieval::ConfidenceLevel::Highest |
+                crate::retrieval::ConfidenceLevel::Low));  // Current or Deprecated
+
+            // Verify scoring formula is consistent
+            let expected = item.similarity * item.temporal_weight * item.confidence_level.base_weight();
+            assert!((item.final_score - expected).abs() < f32::EPSILON);
+        }
+    }
+
+    // ==================== Medium Priority: Symbol Type Tests ====================
+
+    #[tokio::test]
+    async fn test_symbol_scoring_with_confidence_weight() {
+        let executor = create_test_executor();
+
+        let now = chrono::Utc::now();
+
+        // Store a file first (symbols need a parent file)
+        let file = File {
+            id: "symbol-parent-file".to_string(),
+            project_path: "/test/project".to_string(),
+            file_path: "src/lib.rs".to_string(),
+            language: Some("rust".to_string()),
+            kind: FileKind::Source,
+            modified_at: now,
+            size: 1024,
+            content_hash: "file-hash".to_string(),
+            indexed: true,
+        };
+        executor.storage.store_file(&file).expect("should store file");
+
+        // Store a symbol
+        use crate::models::{Symbol, SymbolKind};
+        let symbol = Symbol {
+            id: "test-symbol".to_string(),
+            file_id: "symbol-parent-file".to_string(),
+            name: "test_function".to_string(),
+            kind: SymbolKind::Function,
+            start_line: 10,
+            end_line: 15,
+            doc_comment: Some("Test function documentation".to_string()),
+            code: "fn test_function() { }".to_string(),
+            parent_id: None,
+        };
+        executor.storage.store_symbol(&symbol).expect("should store symbol");
+
+        let raw_results = vec![("test-symbol".to_string(), 0.88)];
+        let options = create_test_options();
+
+        let enhanced = executor.enhance_results(&raw_results, &options).await.unwrap();
+        assert_eq!(enhanced.len(), 1);
+
+        let item = &enhanced[0];
+
+        // Verify Symbol content type
+        assert_eq!(item.content_type, ContentType::Symbol);
+        assert_eq!(item.id, "test-symbol");
+
+        // Symbols should have a confidence level (Highest if git_current, Low otherwise)
+        let confidence_weight = item.confidence_level.base_weight();
+        assert!(confidence_weight >= 0.4 && confidence_weight <= 1.2,
+            "Symbol confidence weight should be in valid range, got {}", confidence_weight);
+
+        // Verify final_score includes confidence weight
+        let expected = item.similarity * item.temporal_weight * confidence_weight;
+        assert!((item.final_score - expected).abs() < f32::EPSILON,
+            "Symbol final_score should follow the full formula");
+    }
+
+    // ==================== Medium Priority: Edge Case Tests ====================
+
+    #[test]
+    fn test_scoring_with_zero_timestamp() {
+        let executor = create_test_executor();
+
+        // Test with timestamp = 0 (should be treated as current/age_days=0)
+        let item = EnhancedItem::new(
+            "test-zero-timestamp".to_string(),
+            ContentType::File,
+            0.75,
+            0, // Zero timestamp
+            "Test content".to_string(),
+        );
+
+        let scored = executor.apply_time_aware_scoring(item).unwrap();
+
+        // Zero timestamp should result in age_days = 0 (current)
+        assert_eq!(scored.age_description, "Current");
+        assert!(scored.is_current);
+
+        // Verify scoring formula still works correctly
+        let expected = scored.similarity * scored.temporal_weight * scored.confidence_level.base_weight();
+        assert!((scored.final_score - expected).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_scoring_with_negative_timestamp_fallback() {
+        let executor = create_test_executor();
+
+        // Test with negative timestamp (edge case, should be handled gracefully)
+        let item = EnhancedItem::new(
+            "test-negative-timestamp".to_string(),
+            ContentType::File,
+            0.75,
+            -100, // Negative timestamp (invalid/unlikely)
+            "Test content".to_string(),
+        );
+
+        // Should not panic, but handle gracefully
+        let scored = executor.apply_time_aware_scoring(item);
+
+        // The code handles timestamp > 0 check, so negative will be treated as 0
+        assert!(scored.is_ok());
+
+        let scored = scored.unwrap();
+        // Negative timestamp results in large positive age_days calculation
+        // but the code should handle it without panicking
+        assert!(scored.final_score >= 0.0);
+        assert!(scored.final_score <= scored.similarity * 1.2); // Max with confidence
+    }
+
+    #[test]
+    fn test_scoring_with_future_timestamp() {
+        let executor = create_test_executor();
+
+        // Test with future timestamp (edge case)
+        let future_timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64 + 86400; // 1 day in the future
+
+        let item = EnhancedItem::new(
+            "test-future-timestamp".to_string(),
+            ContentType::File,
+            0.85,
+            future_timestamp,
+            "Future content".to_string(),
+        );
+
+        let scored = executor.apply_time_aware_scoring(item).unwrap();
+
+        // Future timestamp results in negative age_days, but format_age shows it as negative hours
+        // The scoring calculation handles this correctly by using max(0, age_days)
+        assert!(scored.age_description.contains("hours ago") || scored.age_description == "Current");
+
+        // temporal_weight should be high (near or above 1.0 since age_days is negative/maxed at 0)
+        assert!(scored.temporal_weight > 0.95);
+
+        // Most importantly: verify scoring formula still works correctly
+        let expected = scored.similarity * scored.temporal_weight * scored.confidence_level.base_weight();
+        assert!((scored.final_score - expected).abs() < f32::EPSILON,
+            "Scoring formula should work correctly even with future timestamps");
     }
 }

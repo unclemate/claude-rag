@@ -18,6 +18,20 @@ impl TimeDecay {
     }
 
     /// Calculate combined score from similarity and temporal factors.
+    ///
+    /// # Deprecated
+    ///
+    /// This function is deprecated because it only calculates `similarity * temporal_weight`
+    /// and does not include `confidence_weight`. Use direct multiplication instead:
+    ///
+    /// ```rust
+    /// // Instead of:
+    /// // let score = TimeDecay::combined_score(similarity, temporal_weight);
+    ///
+    /// // Use the full formula directly:
+    /// let final_score = similarity * temporal_weight * confidence_weight;
+    /// ```
+    #[deprecated(since = "0.1.0", note = "Use direct multiplication with confidence_weight instead: similarity * temporal_weight * confidence_weight")]
     pub fn combined_score(similarity: f32, temporal_weight: f32) -> f32 {
         similarity * temporal_weight
     }
@@ -45,7 +59,14 @@ mod tests {
 
     #[test]
     fn test_combined_score() {
+        // Note: This tests the deprecated combined_score function for backward compatibility.
+        // The function should still return correct results even though it's deprecated.
+        #[allow(deprecated)]
         let score = TimeDecay::combined_score(0.9, 1.2);
         assert!((score - 1.08).abs() < 0.01);
+
+        // Verify the formula matches direct multiplication
+        let direct = 0.9 * 1.2;
+        assert!((score - direct).abs() < f32::EPSILON);
     }
 }
