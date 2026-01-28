@@ -1,5 +1,6 @@
 //! File collection and indexing.
 
+use crate::document::DocumentParser;
 use crate::error::{RagError, Result};
 use crate::models::File;
 use crate::scanner::FileScanner;
@@ -8,6 +9,7 @@ use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use tracing::warn;
 
 /// File chunk for indexing.
 #[derive(Debug, Clone)]
@@ -152,6 +154,9 @@ impl FileCollector {
 
     /// Split file content into chunks.
     ///
+    /// For document files (.md, .rst, .adoc, .txt), uses DocumentParser for
+    /// structured chunking. For source files, uses line-based chunking.
+    ///
     /// # Arguments
     /// * `content` - File content
     /// * `file_path` - File path for chunk ID generation
@@ -159,6 +164,47 @@ impl FileCollector {
     /// # Returns
     /// * `Vec<FileChunk>` - List of chunks
     pub fn chunk_file_content(&self, content: &str, file_path: &Path) -> Vec<FileChunk> {
+        // Early exit for empty content
+        if content.is_empty() {
+            return Vec::new();
+        }
+
+        // Try document parsing for supported formats
+        match DocumentParser::from_path(file_path) {
+            Ok(parser) => self.chunk_with_parser(content, file_path, parser),
+            Err(_) => self.chunk_source_file(content, file_path),
+        }
+    }
+
+    /// Chunk content using a specific DocumentParser instance.
+    fn chunk_with_parser(&self, content: &str, file_path: &Path, parser: DocumentParser) -> Vec<FileChunk> {
+        let file_id = self.compute_file_id(file_path);
+
+        match parser.parse(content, file_path, &file_id) {
+            Ok(doc_chunks) => {
+                // Convert DocChunk to FileChunk
+                doc_chunks
+                    .into_iter()
+                    .map(|dc| FileChunk {
+                        content: dc.content,
+                        line_range: (dc.start_line, dc.end_line),
+                        chunk_id: dc.id,
+                    })
+                    .collect()
+            }
+            Err(e) => {
+                warn!(
+                    file_path = %file_path.display(),
+                    error = %e,
+                    "Document parsing failed, falling back to line-based chunking"
+                );
+                self.chunk_source_file(content, file_path)
+            }
+        }
+    }
+
+    /// Chunk source files using line-based approach (existing logic).
+    fn chunk_source_file(&self, content: &str, file_path: &Path) -> Vec<FileChunk> {
         let lines: Vec<&str> = content.lines().collect();
 
         if lines.is_empty() {
@@ -196,6 +242,12 @@ impl FileCollector {
         chunks
     }
 
+    /// Compute file ID for document parsing.
+    fn compute_file_id(&self, file_path: &Path) -> String {
+        let path_str = file_path.to_string_lossy();
+        format!("file:{:x}", Sha256::digest(path_str.as_bytes()))
+    }
+
     /// Generate a unique chunk ID.
     fn generate_chunk_id(&self, file_path: &Path, start: usize, end: usize) -> String {
         let path_str = file_path.to_string_lossy();
@@ -223,7 +275,11 @@ impl FileCollector {
                     stats.files_collected += 1;
                 }
                 Err(e) => {
-                    eprintln!("Error storing file {}: {}", file.file_path, e);
+                    warn!(
+                        file_path = %file.file_path,
+                        error = %e,
+                        "Error storing file"
+                    );
                     stats.errors += 1;
                 }
             }
@@ -518,5 +574,200 @@ mod tests {
             .unwrap();
         assert_eq!(deleted.len(), 1);
         assert!(deleted[0].contains("main.rs"));
+    }
+
+    // Document parser integration tests
+
+    #[test]
+    fn test_chunk_markdown_document() {
+        let temp = TempDir::new().unwrap();
+        let file_path = temp.path().join("test.md");
+
+        let content = r#"# Title
+
+## Section 1
+
+First paragraph.
+
+## Section 2
+
+Second paragraph with **bold** text.
+"#;
+
+        create_test_file(temp.path(), "test.md", content);
+
+        let collector = FileCollector::new(temp.path()).unwrap();
+        let chunks = collector.chunk_file_content(content, &file_path);
+
+        // DocumentParser should generate multiple chunks (headers + paragraphs)
+        assert!(chunks.len() >= 3);
+
+        // Verify chunk ID format (DocChunk-generated IDs)
+        assert!(chunks[0].chunk_id.starts_with("chunk:"));
+    }
+
+    #[test]
+    fn test_chunk_source_file_unchanged() {
+        // Verify that source file behavior is unchanged
+        let temp = TempDir::new().unwrap();
+        let file_path = temp.path().join("test.rs");
+
+        let content = "fn main() {\n    println!(\"Hello\");\n}";
+
+        create_test_file(temp.path(), "test.rs", content);
+
+        let collector = FileCollector::new(temp.path()).unwrap();
+        let chunks = collector.chunk_file_content(content, &file_path);
+
+        // Source files still use line-based chunking
+        assert_eq!(chunks.len(), 1);
+    }
+
+    #[test]
+    fn test_chunk_rst_document() {
+        // Test reStructuredText
+        let temp = TempDir::new().unwrap();
+        let file_path = temp.path().join("test.rst");
+
+        let content = "Title\n=====\n\nContent here.";
+
+        create_test_file(temp.path(), "test.rst", content);
+
+        let collector = FileCollector::new(temp.path()).unwrap();
+        let chunks = collector.chunk_file_content(content, &file_path);
+
+        assert!(chunks.len() >= 1);
+    }
+
+    #[test]
+    fn test_chunk_unsupported_format() {
+        // Test that unsupported formats fall back to line-based chunking
+        let temp = TempDir::new().unwrap();
+        let file_path = temp.path().join("test.xyz");
+
+        let content = "Line 1\nLine 2\nLine 3";
+
+        create_test_file(temp.path(), "test.xyz", content);
+
+        let collector = FileCollector::new(temp.path()).unwrap();
+        let chunks = collector.chunk_file_content(content, &file_path);
+
+        // Should fall back to line-based chunking
+        assert_eq!(chunks.len(), 1);
+    }
+
+    #[test]
+    fn test_chunk_markdown_with_code_blocks() {
+        // Test that Markdown code blocks are recognized as separate chunks
+        let temp = TempDir::new().unwrap();
+        let file_path = temp.path().join("test.md");
+
+        let content = r#"# Title
+
+Some text before code.
+
+```rust
+fn main() {
+    println!("Hello");
+}
+```
+
+Some text after code.
+"#;
+
+        create_test_file(temp.path(), "test.md", content);
+
+        let collector = FileCollector::new(temp.path()).unwrap();
+        let chunks = collector.chunk_file_content(content, &file_path);
+
+        // Should have at least: title, paragraph, code block, paragraph = 4 chunks
+        assert!(chunks.len() >= 3);
+
+        // Verify code block content is preserved
+        let has_code = chunks.iter().any(|c| c.content.contains("fn main"));
+        assert!(has_code, "Code block should be preserved in chunks");
+    }
+
+    #[test]
+    fn test_chunk_empty_document() {
+        // Test empty document handling
+        let temp = TempDir::new().unwrap();
+        let file_path = temp.path().join("empty.md");
+
+        let collector = FileCollector::new(temp.path()).unwrap();
+        let chunks = collector.chunk_file_content("", &file_path);
+
+        assert_eq!(chunks.len(), 0);
+    }
+
+    #[test]
+    fn test_chunk_document_parse_error_fallback() {
+        // Test fallback behavior when document parsing fails
+        // Files without extension will fall back to line-based chunking
+        let temp = TempDir::new().unwrap();
+        let file_path = temp.path().join("no-extension");
+
+        let content = "Line 1\nLine 2\nLine 3";
+
+        create_test_file(temp.path(), "no-extension", content);
+
+        let collector = FileCollector::new(temp.path()).unwrap();
+        let chunks = collector.chunk_file_content(content, &file_path);
+
+        // Should fall back to line-based chunking, return 1 chunk
+        assert_eq!(chunks.len(), 1);
+    }
+
+    #[test]
+    fn test_chunk_markdown_unicode() {
+        // Test Unicode content handling
+        let temp = TempDir::new().unwrap();
+        let file_path = temp.path().join("test.md");
+
+        let content = "# 标题\n\n这是一段中文内容。\n\nAnd English too.";
+
+        create_test_file(temp.path(), "test.md", content);
+
+        let collector = FileCollector::new(temp.path()).unwrap();
+        let chunks = collector.chunk_file_content(content, &file_path);
+
+        // Should correctly parse Chinese content
+        assert!(chunks.len() >= 2);
+        let has_chinese = chunks.iter().any(|c| c.content.contains("中文"));
+        assert!(has_chinese, "Chinese content should be preserved");
+    }
+
+    #[test]
+    fn test_chunk_adoc_document() {
+        // Test AsciiDoc format
+        let temp = TempDir::new().unwrap();
+        let file_path = temp.path().join("test.adoc");
+
+        let content = "= Title\n\nSome content.";
+
+        create_test_file(temp.path(), "test.adoc", content);
+
+        let collector = FileCollector::new(temp.path()).unwrap();
+        let chunks = collector.chunk_file_content(content, &file_path);
+
+        // Should parse AsciiDoc
+        assert!(chunks.len() >= 1);
+    }
+
+    #[test]
+    fn test_chunk_txt_document() {
+        // Test plain text format
+        let temp = TempDir::new().unwrap();
+        let file_path = temp.path().join("test.txt");
+
+        let content = "First paragraph\n\nSecond paragraph";
+
+        create_test_file(temp.path(), "test.txt", content);
+
+        let collector = FileCollector::new(temp.path()).unwrap();
+        let chunks = collector.chunk_file_content(content, &file_path);
+
+        // Should parse plain text
+        assert!(chunks.len() >= 1);
     }
 }

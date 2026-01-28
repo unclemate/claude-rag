@@ -15,6 +15,7 @@ use crate::vector::VectorBuilder;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
+use tracing::warn;
 
 /// Default batch size for embedding generation.
 const DEFAULT_BATCH_SIZE: usize = 8;
@@ -240,7 +241,11 @@ impl Indexer {
                     stats.embeddings_generated += 1;
                 }
                 Err(e) => {
-                    eprintln!("Error generating embedding for chunk {}: {}", chunk_id, e);
+                    warn!(
+                        chunk_id = %chunk_id,
+                        error = %e,
+                        "Error generating embedding for chunk"
+                    );
                     stats.errors += 1;
                 }
             }
@@ -295,7 +300,11 @@ impl Indexer {
                         self.builder.normalize(&mut normalized);
 
                         if let Err(e) = index.insert(chunk_id.clone(), *content_type, normalized) {
-                            eprintln!("Error inserting {} into index: {}", chunk_id, e);
+                            warn!(
+                                chunk_id = %chunk_id,
+                                error = %e,
+                                "Error inserting into index"
+                            );
                             stats.errors += 1;
                         } else {
                             stats.embeddings_generated += 1;
@@ -303,7 +312,11 @@ impl Indexer {
                     }
                 }
                 Err(e) => {
-                    eprintln!("Error generating batch embeddings: {}", e);
+                    warn!(
+                        batch_size = chunk_batch.len(),
+                        error = %e,
+                        "Error generating batch embeddings"
+                    );
                     stats.errors += chunk_batch.len();
                 }
             }

@@ -5,6 +5,7 @@ use crate::parser::{ParsedSession, SessionParser};
 use crate::storage::sled::StorageManager;
 use chrono::{DateTime, Utc};
 use std::path::{Path, PathBuf};
+use tracing::warn;
 
 /// Collection statistics for sessions.
 #[derive(Debug, Clone, Default)]
@@ -78,7 +79,11 @@ impl SessionCollector {
                 match self.parser.parse_session(session_dir) {
                     Ok(session) => all_sessions.push(session),
                     Err(e) => {
-                        eprintln!("Warning: Failed to parse session {:?}: {}", session_dir, e);
+                        warn!(
+                            session_dir = %session_dir.display(),
+                            error = %e,
+                            "Failed to parse session"
+                        );
                     }
                 }
             }
@@ -172,7 +177,11 @@ impl SessionCollector {
                     stats.sessions_collected += 1;
                 }
                 Err(e) => {
-                    eprintln!("Error storing session {}: {}", parsed.session.id, e);
+                    warn!(
+                        session_id = %parsed.session.id,
+                        error = %e,
+                        "Error storing session"
+                    );
                     stats.errors += 1;
                     continue;
                 }
@@ -185,7 +194,11 @@ impl SessionCollector {
                         stats.messages_collected += 1;
                     }
                     Err(e) => {
-                        eprintln!("Error storing message {}: {}", message.id, e);
+                        warn!(
+                            message_id = %message.id,
+                            error = %e,
+                            "Error storing message"
+                        );
                         stats.errors += 1;
                     }
                 }

@@ -1386,7 +1386,7 @@ mod tests {
         // Now persist should work
         let result = Daemon::persist_project_hnsw(project_path.to_str().unwrap());
         if let Err(e) = &result {
-            eprintln!("Persist error: {:?}", e);
+            warn!(error = ?e, "Persist error");
         }
         assert!(result.is_ok(), "persist should succeed: {:?}", result);
     }

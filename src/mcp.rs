@@ -107,6 +107,7 @@ use std::fmt::{Display, Write};
 use std::io::{self, BufRead, BufReader, Write as IoWrite};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use tracing::warn;
 
 // ==========================================================================
 // Protocol Constants
@@ -118,6 +119,7 @@ const MCP_VERSION: &str = "2024-11-05";
 /// JSON-RPC 2.0 error codes.
 const JSONRPC_ERROR_METHOD_NOT_FOUND: i32 = -32601;
 const JSONRPC_ERROR_INVALID_PARAMS: i32 = -32602;
+#[allow(dead_code)]
 const JSONRPC_ERROR_INTERNAL_ERROR: i32 = -32603;
 
 // ==========================================================================
@@ -208,6 +210,7 @@ const OUTPUT_BASE_CAPACITY: usize = 256;
 const OUTPUT_PER_RESULT_CAPACITY: usize = 80;
 
 /// Request timeout in seconds to prevent slow loris attacks.
+#[allow(dead_code)]
 const REQUEST_TIMEOUT_SECONDS: u64 = 30;
 
 /// MCP server for RAG functionality.
@@ -355,7 +358,10 @@ impl McpServer {
                 }
             }
             // If env var path is invalid, warn and fall through to current directory
-            eprintln!("Warning: {} environment variable points to invalid path, using current directory instead", PROJECT_PATH_ENV);
+            warn!(
+                env_var = PROJECT_PATH_ENV,
+                "Environment variable points to invalid path, using current directory instead"
+            );
         }
 
         // Use current directory as final fallback
@@ -631,7 +637,12 @@ impl McpServer {
                 let results = match index.search(&embedding, effective_top_k, content_type) {
                     Ok(results) => results,
                     Err(e) => {
-                        eprintln!("Warning: HNSW search failed: {}", e);
+                        warn!(
+                            error = %e,
+                            top_k = effective_top_k,
+                            content_type = ?content_type,
+                            "HNSW search failed"
+                        );
                         // Return empty results rather than failing completely
                         Vec::new()
                     }
@@ -701,7 +712,12 @@ impl McpServer {
                 let raw_results = match index.search(&embedding, search_limit, Some(base_type)) {
                     Ok(results) => results,
                     Err(e) => {
-                        eprintln!("Warning: HNSW search with filter failed: {}", e);
+                        warn!(
+                            error = %e,
+                            search_limit = search_limit,
+                            content_type = ?base_type,
+                            "HNSW search with filter failed"
+                        );
                         Vec::new()
                     }
                 };

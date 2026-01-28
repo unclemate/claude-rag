@@ -12,7 +12,9 @@ use crate::config::{Config, ConfigManager};
 use crate::error::{RagError, Result};
 use crate::formatter::{OutputFormat, ResultFormatter};
 use crate::indexer::Indexer;
-use crate::models::{Commit, ContentType, File, Message, Session};
+use crate::models::ContentType;
+#[allow(unused_imports)]
+use crate::models::{Commit, File, Message, Session};
 use crate::models::file::FileKind;
 use crate::retrieval::{ConfidenceScore, FeatureTimeline, TimeDecay};
 use crate::results::{EnhancedItem, GitInfo};
