@@ -1,15 +1,18 @@
 //! Sled database wrapper for KV storage.
 
 use sled::Db;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::error::{Result, RagError};
 use crate::models::{Commit, File, GitDiff, Message, Session, Symbol};
+use crate::storage::HnswIndex;
 
 /// Storage manager for project data.
 pub struct StorageManager {
     /// Sled database instance.
     db: Db,
+    /// Project path for HNSW index storage.
+    project_path: PathBuf,
 }
 
 impl StorageManager {
@@ -24,7 +27,10 @@ impl StorageManager {
         let db = sled::open(&db_dir)
             .map_err(RagError::Sled)?;
 
-        Ok(Self { db })
+        Ok(Self {
+            db,
+            project_path: project_path.to_path_buf(),
+        })
     }
 
     /// Get the database instance.
@@ -51,6 +57,41 @@ impl StorageManager {
         } else {
             Ok(None)
         }
+    }
+
+    /// Get all sessions from storage.
+    pub fn get_all_sessions(&self) -> Result<Vec<Session>> {
+        let mut sessions = Vec::new();
+        let prefix = "session:";
+
+        // Use sled's prefix iteration
+        for item in self.db.scan_prefix(prefix) {
+            let (_key, value) = item.map_err(RagError::Sled)?;
+            if let Ok(session) = serde_json::from_slice::<Session>(&value) {
+                sessions.push(session);
+            }
+        }
+
+        Ok(sessions)
+    }
+
+    /// Iterate over all sessions with a callback function.
+    ///
+    /// This is memory-efficient for large datasets as it doesn't load all items at once.
+    pub fn iter_sessions<F>(&self, mut callback: F) -> Result<()>
+    where
+        F: FnMut(Session) -> Result<()>,
+    {
+        let prefix = "session:";
+
+        for item in self.db.scan_prefix(prefix) {
+            let (_key, value) = item.map_err(RagError::Sled)?;
+            if let Ok(session) = serde_json::from_slice::<Session>(&value) {
+                callback(session)?;
+            }
+        }
+
+        Ok(())
     }
 
     /// Store a message.
@@ -139,6 +180,41 @@ impl StorageManager {
         } else {
             Ok(None)
         }
+    }
+
+    /// Get all commits from storage.
+    pub fn get_all_commits(&self) -> Result<Vec<Commit>> {
+        let mut commits = Vec::new();
+        let prefix = "commit:";
+
+        // Use sled's prefix iteration
+        for item in self.db.scan_prefix(prefix) {
+            let (_key, value) = item.map_err(RagError::Sled)?;
+            if let Ok(commit) = serde_json::from_slice::<Commit>(&value) {
+                commits.push(commit);
+            }
+        }
+
+        Ok(commits)
+    }
+
+    /// Iterate over all commits with a callback function.
+    ///
+    /// This is memory-efficient for large datasets as it doesn't load all items at once.
+    pub fn iter_commits<F>(&self, mut callback: F) -> Result<()>
+    where
+        F: FnMut(Commit) -> Result<()>,
+    {
+        let prefix = "commit:";
+
+        for item in self.db.scan_prefix(prefix) {
+            let (_key, value) = item.map_err(RagError::Sled)?;
+            if let Ok(commit) = serde_json::from_slice::<Commit>(&value) {
+                callback(commit)?;
+            }
+        }
+
+        Ok(())
     }
 
     /// Store a git diff.
@@ -278,6 +354,35 @@ impl StorageManager {
         Ok(())
     }
 
+    // ==================== HNSW Index Operations ====================
+
+    /// Get the HNSW index file path for this project.
+    pub fn hnsw_path(&self) -> PathBuf {
+        crate::config::ConfigManager::rag_dir(&self.project_path).join("hnsw.bin")
+    }
+
+    /// Save HNSW index to disk.
+    pub fn save_hnsw(&self, index: &HnswIndex) -> Result<()> {
+        let path = self.hnsw_path();
+        index.save(&path)
+    }
+
+    /// Load HNSW index from disk.
+    ///
+    /// Returns `Ok(None)` if the index file doesn't exist.
+    pub fn load_hnsw(&self) -> Result<Option<HnswIndex>> {
+        let path = self.hnsw_path();
+        if !path.exists() {
+            return Ok(None);
+        }
+        HnswIndex::load(&path).map(Some)
+    }
+
+    /// Check if HNSW index exists on disk.
+    pub fn has_hnsw_index(&self) -> bool {
+        self.hnsw_path().exists()
+    }
+
     /// Get database size in bytes.
     pub fn size_on_disk(&self) -> Result<u64> {
         self.db.size_on_disk().map_err(RagError::Sled)
@@ -366,6 +471,7 @@ mod tests {
             project_path: project_path.display().to_string(),
             file_path: "src/main.rs".to_string(),
             language: Some("rust".to_string()),
+            kind: crate::models::file::FileKind::Source,
             modified_at: Utc::now(),
             size: 1024,
             content_hash: "abc123".to_string(),
@@ -449,5 +555,54 @@ mod tests {
         // Check file_commits index
         let commit_ids = storage.get_file_commits(&project_path.display().to_string(), "src/main.rs").unwrap();
         assert_eq!(commit_ids, vec!["commit-1".to_string()]);
+    }
+
+    #[test]
+    fn test_hnsw_path() {
+        let temp_dir = TempDir::new().unwrap();
+        let project_path = temp_dir.path();
+        let storage = StorageManager::open_project_db(project_path).unwrap();
+
+        let hnsw_path = storage.hnsw_path();
+        assert!(hnsw_path.ends_with(".rag/hnsw.bin"));
+        assert!(hnsw_path.starts_with(project_path));
+    }
+
+    #[test]
+    fn test_hnsw_save_load() {
+        use crate::models::ContentType;
+
+        let temp_dir = TempDir::new().unwrap();
+        let project_path = temp_dir.path();
+        let storage = StorageManager::open_project_db(project_path).unwrap();
+
+        // Create and save HNSW index
+        let mut index = HnswIndex::new(16, 200, 50);
+        index.insert(
+            "test-id".to_string(),
+            ContentType::Message,
+            vec![0.1, 0.2, 0.3],
+        ).unwrap();
+
+        storage.save_hnsw(&index).unwrap();
+        assert!(storage.has_hnsw_index());
+
+        // Load HNSW index
+        let loaded = storage.load_hnsw().unwrap();
+        assert!(loaded.is_some());
+        let loaded_index = loaded.unwrap();
+        assert_eq!(loaded_index.len(), 1);
+    }
+
+    #[test]
+    fn test_hnsw_load_not_exists() {
+        let temp_dir = TempDir::new().unwrap();
+        let project_path = temp_dir.path();
+        let storage = StorageManager::open_project_db(project_path).unwrap();
+
+        // HNSW index doesn't exist
+        assert!(!storage.has_hnsw_index());
+        let loaded = storage.load_hnsw().unwrap();
+        assert!(loaded.is_none());
     }
 }

@@ -216,15 +216,10 @@ fn handle_daemon(daemon_cmd: DaemonCommands) -> Result<()> {
 }
 
 fn handle_query(query: String, r#type: Option<String>, top_k: usize, timeline: bool, format: String) -> Result<()> {
-    println!("Querying: {}", query);
-    if let Some(t) = r#type {
-        println!("  Type: {}", t);
-    }
-    println!("  Top-K: {}", top_k);
-    println!("  Timeline: {}", timeline);
-    println!("  Format: {}", format);
-    // TODO: Implement query
-    println!("✓ Query complete");
+    // Use tokio runtime for async query execution
+    let runtime = tokio::runtime::Runtime::new()?;
+    let result = runtime.block_on(claude_rag::execute_query(query, r#type, top_k, timeline, format))?;
+    println!("{}", result);
     Ok(())
 }
 

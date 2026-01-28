@@ -11,10 +11,12 @@
 #![warn(missing_docs)]
 #![warn(clippy::all)]
 
+pub mod ast;
 pub mod cli;
 pub mod collector;
 pub mod config;
 pub mod daemon;
+pub mod document;
 pub mod embedding;
 pub mod error;
 pub mod formatter;
@@ -30,8 +32,11 @@ pub mod storage;
 pub mod vector;
 
 pub mod models;
+pub mod query;
 
+pub use ast::{AstParser, SupportedLanguage};
 pub use config::EmbeddingConfig;
 pub use error::{Result, RagError};
 pub use parser::{ParsedSession, SessionParser};
+pub use query::{execute_query, QueryExecutor, QueryOptions, QueryStats};
 pub use results::{EnhancedItem, GitInfo, SupersededInfo};

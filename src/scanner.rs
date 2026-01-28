@@ -380,11 +380,19 @@ impl FileScanner {
 
         let id = format!("file:{:x}", Sha256::digest(relative_path.as_bytes()));
 
+        // Map FileType to FileKind
+        let kind = match scanned.file_type {
+            FileType::Source => crate::models::file::FileKind::Source,
+            FileType::Documentation => crate::models::file::FileKind::Docs,
+            FileType::Other => crate::models::file::FileKind::Other,
+        };
+
         File {
             id,
             project_path: self.project_root.to_string_lossy().to_string(),
             file_path: relative_path,
             language: scanned.language.clone(),
+            kind,
             modified_at: scanned.modified_at,
             size: scanned.size,
             content_hash: scanned.content_hash.clone(),

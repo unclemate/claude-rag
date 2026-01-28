@@ -2,6 +2,7 @@
 //!
 //! Defines all core data structures used throughout the application.
 
+pub mod chunk;
 pub mod commit;
 pub mod diff;
 pub mod file;
@@ -9,6 +10,7 @@ pub mod message;
 pub mod session;
 pub mod symbol;
 
+pub use chunk::{ChunkKind, DocChunk};
 pub use commit::Commit;
 pub use diff::GitDiff;
 pub use file::File;

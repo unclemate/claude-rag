@@ -1,6 +1,7 @@
 //! Symbol model for code-level indexing.
 
 use serde::{Deserialize, Serialize};
+use std::fmt;
 
 /// Kind of code symbol.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -21,6 +22,21 @@ pub enum SymbolKind {
     Module,
     /// Other.
     Other,
+}
+
+impl fmt::Display for SymbolKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SymbolKind::Function => write!(f, "Function"),
+            SymbolKind::Method => write!(f, "Method"),
+            SymbolKind::Class => write!(f, "Class"),
+            SymbolKind::Interface => write!(f, "Interface"),
+            SymbolKind::Variable => write!(f, "Variable"),
+            SymbolKind::Enum => write!(f, "Enum"),
+            SymbolKind::Module => write!(f, "Module"),
+            SymbolKind::Other => write!(f, "Other"),
+        }
+    }
 }
 
 /// A code symbol (function, class, etc.).

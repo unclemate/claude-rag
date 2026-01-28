@@ -3,6 +3,17 @@
 use serde::{Deserialize, Serialize};
 use chrono::{DateTime, Utc};
 
+/// File classification kind.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum FileKind {
+    /// Source code file.
+    Source,
+    /// Documentation file.
+    Docs,
+    /// Other file type.
+    Other,
+}
+
 /// A source file in the project.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct File {
@@ -14,6 +25,8 @@ pub struct File {
     pub file_path: String,
     /// File language/type.
     pub language: Option<String>,
+    /// File kind (source/docs/other).
+    pub kind: FileKind,
     /// File modification time.
     pub modified_at: DateTime<Utc>,
     /// File size in bytes.
@@ -35,6 +48,7 @@ mod tests {
             project_path: "/test".to_string(),
             file_path: "src/main.rs".to_string(),
             language: Some("rust".to_string()),
+            kind: FileKind::Source,
             modified_at: Utc::now(),
             size: 1024,
             content_hash: "abc123".to_string(),

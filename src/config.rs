@@ -109,6 +109,14 @@ pub struct DaemonConfig {
     pub session_timeout_seconds: u64,
     /// HNSW persist interval in seconds.
     pub persist_interval_seconds: u64,
+    /// Socket path for daemon communication.
+    pub socket_path: Option<String>,
+    /// PID file path.
+    pub pid_file: Option<String>,
+    /// File event debounce delay in milliseconds.
+    pub file_debounce_ms: u64,
+    /// Graceful shutdown timeout in seconds.
+    pub shutdown_timeout_seconds: u64,
 }
 
 impl Default for DaemonConfig {
@@ -116,6 +124,10 @@ impl Default for DaemonConfig {
         Self {
             session_timeout_seconds: 60,
             persist_interval_seconds: 300,
+            socket_path: None,
+            pid_file: None,
+            file_debounce_ms: 500,
+            shutdown_timeout_seconds: 5,
         }
     }
 }
@@ -156,6 +168,8 @@ pub struct ConfidenceConfig {
     pub git_commit_weight: f32,
     /// Session weight.
     pub session_weight: f32,
+    /// Temporal decay rate per day (default: 0.05).
+    pub decay_rate: f32,
 }
 
 impl Default for ConfidenceConfig {
@@ -164,6 +178,7 @@ impl Default for ConfidenceConfig {
             code_weight: 1.2,
             git_commit_weight: 1.0,
             session_weight: 0.7,
+            decay_rate: 0.05,
         }
     }
 }
