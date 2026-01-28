@@ -61,6 +61,240 @@ pub struct QueryOptions {
     pub format: String,
     /// Project path (defaults to current directory).
     pub project_path: Option<PathBuf>,
+    /// Time range filter for results.
+    pub time_range: Option<TimeRange>,
+}
+
+/// Time range filter for queries.
+///
+/// This struct represents a time interval used to filter search results
+/// by their timestamp. It supports both absolute timestamps and
+/// relative time specifications.
+///
+/// # Fields
+///
+/// * `after` - Start of time range (Unix timestamp, inclusive).
+///              Results with timestamp >= after are included.
+/// * `before` - End of time range (Unix timestamp, exclusive).
+///               Results with timestamp < before are included.
+///
+/// # Examples
+///
+/// ```rust
+/// use claude_rag::query::TimeRange;
+///
+/// // Empty range (no filtering)
+/// let range = TimeRange::none();
+/// assert!(range.is_empty());
+///
+/// // Last 7 days using max_age
+/// let range = TimeRange::from_cli_args(None, None, Some(7)).unwrap();
+/// let now = std::time::SystemTime::now()
+///     .duration_since(std::time::UNIX_EPOCH)
+///     .unwrap()
+///     .as_secs() as i64;
+/// assert!(range.contains(now));  // Now is included
+/// assert!(range.contains(now - 3 * 86400));  // 3 days ago is included
+/// assert!(!range.contains(now - 10 * 86400));  // 10 days ago is excluded
+///
+/// // Date range using ISO 8601
+/// let range = TimeRange::from_cli_args(Some("2025-01-01"), Some("2025-01-31"), None).unwrap();
+/// // Includes content from January 2025
+///
+/// // Relative time range
+/// let range = TimeRange::from_cli_args(Some("7d"), Some("1d"), None).unwrap();
+/// // Includes content from 1 to 7 days ago
+///
+/// # Time Format
+///
+/// - **Relative time** (requires suffix): `7d` (7 days), `1w` (1 week), `1m` (1 month), `1y` (1 year)
+/// - **ISO 8601 date**: `2025-01-01` (YYYY-MM-DD format)
+/// - **Case insensitive**: `7D`, `1W`, `1M`, `1Y` are also valid
+///
+/// # Special Behavior
+///
+/// - **Symbol type**: `ContentType::Symbol` items always pass time filtering
+///   as they represent current code (timestamp = 0)
+///
+/// # Validation
+///
+/// - When both `after` and `before` are specified, `after` must be < `before`
+/// - Pure numbers without suffix are rejected (e.g., `7` is invalid, use `7d`)
+/// - Negative values are rejected
+#[derive(Debug, Clone, PartialEq)]
+pub struct TimeRange {
+    /// Start of time range (Unix timestamp, inclusive).
+    pub after: Option<i64>,
+    /// End of time range (Unix timestamp, exclusive).
+    pub before: Option<i64>,
+}
+
+impl TimeRange {
+    /// Create an empty time range (no filtering).
+    pub fn none() -> Self {
+        Self { after: None, before: None }
+    }
+
+    /// Parse time string from CLI args.
+    ///
+    /// Time format must have suffix for relative time: 7d, 1w, 1m, 1y
+    /// Or ISO 8601 date: 2025-01-01
+    ///
+    /// # Arguments
+    ///
+    /// * `after` - Optional start time string
+    /// * `before` - Optional end time string
+    /// * `max_age` - Optional maximum age in days (sets 'after' to now - max_age)
+    pub fn from_cli_args(after: Option<&str>, before: Option<&str>, max_age: Option<u64>) -> Result<Self> {
+        let mut result = Self::none();
+
+        // Process max_age first (sets the 'after' boundary)
+        if let Some(days) = max_age {
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map_err(|e| RagError::Validation(format!("Failed to get current time: {}", e)))?
+                .as_secs() as i64;
+            result.after = Some(now - (days as i64 * 86400));
+        }
+
+        // Process explicit 'after' argument (overrides max_age)
+        if let Some(after_str) = after {
+            result.after = Some(Self::parse_time_string(after_str)?);
+        }
+
+        // Process 'before' argument
+        if let Some(before_str) = before {
+            result.before = Some(Self::parse_time_string(before_str)?);
+        }
+
+        // Validate: after must be before before (if both are set)
+        if let (Some(after), Some(before)) = (result.after, result.before) {
+            if after >= before {
+                return Err(RagError::Validation(format!(
+                    "Invalid time range: 'after' ({}) must be before 'before' ({})",
+                    after, before
+                )));
+            }
+        }
+
+        Ok(result)
+    }
+
+    /// Parse time string to Unix timestamp.
+    ///
+    /// Supported formats:
+    /// - Relative time with suffix: 7d, 30d, 1w, 1m, 1y
+    /// - ISO 8601 date: 2025-01-01
+    ///
+    /// # Arguments
+    ///
+    /// * `s` - Time string to parse
+    fn parse_time_string(s: &str) -> Result<i64> {
+        let s = s.trim();
+
+        // Check for relative time suffix (d, w, m, y)
+        if let Some(suffix) = s.chars().last() {
+            match suffix {
+                'd' | 'D' => {
+                    // Days: 7d, 30d
+                    let days: i64 = s[..s.len()-1]
+                        .parse()
+                        .map_err(|_| RagError::Validation(format!("Invalid days format: '{}'", s)))?;
+                    if days <= 0 {
+                        return Err(RagError::Validation(format!("Days must be positive: '{}'", s)));
+                    }
+                    let now = SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .map_err(|e| RagError::Validation(format!("Failed to get current time: {}", e)))?
+                        .as_secs() as i64;
+                    return Ok(now - (days * 86400));
+                }
+                'w' | 'W' => {
+                    // Weeks: 1w, 2w
+                    let weeks: i64 = s[..s.len()-1]
+                        .parse()
+                        .map_err(|_| RagError::Validation(format!("Invalid weeks format: '{}'", s)))?;
+                    if weeks <= 0 {
+                        return Err(RagError::Validation(format!("Weeks must be positive: '{}'", s)));
+                    }
+                    let now = SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .map_err(|e| RagError::Validation(format!("Failed to get current time: {}", e)))?
+                        .as_secs() as i64;
+                    return Ok(now - (weeks * 7 * 86400));
+                }
+                'm' | 'M' => {
+                    // Months: 1m, 6m (approximate as 30 days)
+                    let months: i64 = s[..s.len()-1]
+                        .parse()
+                        .map_err(|_| RagError::Validation(format!("Invalid months format: '{}'", s)))?;
+                    if months <= 0 {
+                        return Err(RagError::Validation(format!("Months must be positive: '{}'", s)));
+                    }
+                    let now = SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .map_err(|e| RagError::Validation(format!("Failed to get current time: {}", e)))?
+                        .as_secs() as i64;
+                    return Ok(now - (months * 30 * 86400));
+                }
+                'y' | 'Y' => {
+                    // Years: 1y, 2y (approximate as 365 days)
+                    let years: i64 = s[..s.len()-1]
+                        .parse()
+                        .map_err(|_| RagError::Validation(format!("Invalid years format: '{}'", s)))?;
+                    if years <= 0 {
+                        return Err(RagError::Validation(format!("Years must be positive: '{}'", s)));
+                    }
+                    let now = SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .map_err(|e| RagError::Validation(format!("Failed to get current time: {}", e)))?
+                        .as_secs() as i64;
+                    return Ok(now - (years * 365 * 86400));
+                }
+                _ => {
+                    // Continue to try ISO 8601 parsing
+                }
+            }
+        }
+
+        // Try ISO 8601 date parsing: YYYY-MM-DD
+        if s.len() == 10 && &s[4..5] == "-" && &s[7..8] == "-" {
+            let date: chrono::NaiveDate = chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d")
+                .map_err(|_| RagError::Validation(format!("Invalid date format (use YYYY-MM-DD): '{}'", s)))?;
+            let datetime = date.and_hms_opt(0, 0, 0)
+                .ok_or_else(|| RagError::Validation("Failed to create datetime".to_string()))?;
+            return Ok(datetime.and_utc().timestamp());
+        }
+
+        Err(RagError::Validation(format!(
+            "Invalid time format: '{}'. Use relative time (7d, 1w, 1m, 1y) or ISO 8601 date (YYYY-MM-DD)",
+            s
+        )))
+    }
+
+    /// Check if a timestamp is within this time range.
+    ///
+    /// # Arguments
+    ///
+    /// * `timestamp` - Unix timestamp to check
+    pub fn contains(&self, timestamp: i64) -> bool {
+        if let Some(after) = self.after {
+            if timestamp < after {
+                return false;
+            }
+        }
+        if let Some(before) = self.before {
+            if timestamp >= before {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// Check if this time range has any filtering effect.
+    pub fn is_empty(&self) -> bool {
+        self.after.is_none() && self.before.is_none()
+    }
 }
 
 impl QueryOptions {
@@ -337,8 +571,29 @@ impl QueryExecutor {
         // Apply batch time-aware scoring with Git status checking
         let scored_items = self.apply_time_aware_scoring_batch(items).await?;
 
+        // Apply time range filtering (if specified)
+        let mut filtered_items = scored_items;
+        if let Some(ref time_range) = options.time_range {
+            let original_count = filtered_items.len();
+            filtered_items.retain(|item| {
+                // Symbols always pass filtering (represent current code)
+                if item.content_type == ContentType::Symbol {
+                    return true;
+                }
+                time_range.contains(item.timestamp)
+            });
+
+            if filtered_items.len() < original_count {
+                tracing::debug!(
+                    "Time range filtered: {} -> {} results",
+                    original_count,
+                    filtered_items.len()
+                );
+            }
+        }
+
         // Sort by final score
-        let mut enhanced = scored_items;
+        let mut enhanced = filtered_items;
         enhanced.sort_by(|a, b| {
             b.final_score
                 .partial_cmp(&a.final_score)
@@ -711,6 +966,50 @@ pub async fn execute_query(
         timeline,
         format,
         project_path: None,
+        time_range: None,
+    };
+
+    let mut executor = QueryExecutor::from_options(&options)?;
+
+    if timeline {
+        executor.execute_timeline(&options).await
+    } else {
+        executor.execute(&options).await
+    }
+}
+
+/// Execute a query from CLI arguments with time range filter.
+///
+/// This is the main entry point for the `rag query` CLI command with time filtering.
+///
+/// # Arguments
+///
+/// * `query` - Query text
+/// * `content_type` - Optional content type filter
+/// * `top_k` - Number of results to return
+/// * `timeline` - Whether to show timeline
+/// * `format` - Output format
+/// * `time_range` - Optional time range filter
+///
+/// # Returns
+///
+/// Returns formatted results or an error.
+pub async fn execute_query_with_time_range(
+    query: String,
+    content_type: Option<String>,
+    top_k: usize,
+    timeline: bool,
+    format: String,
+    time_range: Option<TimeRange>,
+) -> Result<String> {
+    let options = QueryOptions {
+        query,
+        content_type,
+        top_k,
+        timeline,
+        format,
+        project_path: None,
+        time_range,
     };
 
     let mut executor = QueryExecutor::from_options(&options)?;
@@ -734,6 +1033,7 @@ mod tests {
             timeline: false,
             format: "markdown".to_string(),
             project_path: None,
+            time_range: None,
         }
     }
 
@@ -752,6 +1052,7 @@ mod tests {
             timeline: false,
             format: "markdown".to_string(),
             project_path: None,
+            time_range: None,
         };
         assert!(options.validate().is_err());
     }
@@ -765,6 +1066,7 @@ mod tests {
             timeline: false,
             format: "markdown".to_string(),
             project_path: None,
+            time_range: None,
         };
         assert!(options.validate().is_err());
     }
@@ -778,6 +1080,7 @@ mod tests {
             timeline: false,
             format: "markdown".to_string(),
             project_path: None,
+            time_range: None,
         };
         assert!(options.validate().is_err());
 
@@ -788,6 +1091,7 @@ mod tests {
             timeline: false,
             format: "markdown".to_string(),
             project_path: None,
+            time_range: None,
         };
         assert!(options.validate().is_err());
     }
@@ -804,6 +1108,7 @@ mod tests {
                 timeline: false,
                 format: "markdown".to_string(),
                 project_path: None,
+                time_range: None,
             };
             assert!(options.validate().is_ok(), "Content type '{}' should be valid", ct);
         }
@@ -818,6 +1123,7 @@ mod tests {
             timeline: false,
             format: "markdown".to_string(),
             project_path: None,
+            time_range: None,
         };
         assert!(options.validate().is_err());
     }
@@ -834,6 +1140,7 @@ mod tests {
                 timeline: false,
                 format: fmt.to_string(),
                 project_path: None,
+                time_range: None,
             };
             assert!(options.validate().is_ok(), "Format '{}' should be valid", fmt);
         }
@@ -848,6 +1155,7 @@ mod tests {
             timeline: false,
             format: "invalid".to_string(),
             project_path: None,
+            time_range: None,
         };
         assert!(options.validate().is_err());
     }
@@ -861,6 +1169,7 @@ mod tests {
             timeline: false,
             format: "markdown".to_string(),
             project_path: None,
+            time_range: None,
         };
         assert_eq!(options.parse_content_type_filter(), Some(ContentType::File));
 
@@ -871,6 +1180,7 @@ mod tests {
             timeline: false,
             format: "markdown".to_string(),
             project_path: None,
+            time_range: None,
         };
         assert_eq!(
             options.parse_content_type_filter(),
@@ -884,6 +1194,7 @@ mod tests {
             timeline: false,
             format: "markdown".to_string(),
             project_path: None,
+            time_range: None,
         };
         assert_eq!(options.parse_content_type_filter(), None);
     }
@@ -897,6 +1208,7 @@ mod tests {
             timeline: false,
             format: "markdown".to_string(),
             project_path: None,
+            time_range: None,
         };
         assert_eq!(options.parse_output_format(), OutputFormat::Markdown);
 
@@ -907,6 +1219,7 @@ mod tests {
             timeline: false,
             format: "json".to_string(),
             project_path: None,
+            time_range: None,
         };
         assert_eq!(options.parse_output_format(), OutputFormat::Json);
 
@@ -917,6 +1230,7 @@ mod tests {
             timeline: false,
             format: "text".to_string(),
             project_path: None,
+            time_range: None,
         };
         assert_eq!(options.parse_output_format(), OutputFormat::Text);
 
@@ -928,6 +1242,7 @@ mod tests {
             timeline: false,
             format: "JSON".to_string(),
             project_path: None,
+            time_range: None,
         };
         assert_eq!(options.parse_output_format(), OutputFormat::Json);
     }
@@ -994,6 +1309,7 @@ mod tests {
             timeline: false,
             format: "markdown".to_string(),
             project_path: None,
+            time_range: None,
         };
         assert!(options.validate().is_ok());
     }
@@ -1007,6 +1323,7 @@ mod tests {
             timeline: false,
             format: "markdown".to_string(),
             project_path: None,
+            time_range: None,
         };
         assert!(options.validate().is_ok());
     }
@@ -1020,6 +1337,7 @@ mod tests {
             timeline: false,
             format: "markdown".to_string(),
             project_path: None,
+            time_range: None,
         };
         assert!(options.validate().is_ok());
     }
@@ -1033,6 +1351,7 @@ mod tests {
             timeline: false,
             format: "markdown".to_string(),
             project_path: None,
+            time_range: None,
         };
         assert_eq!(options.parse_content_type_filter(), Some(ContentType::File));
 
@@ -1043,6 +1362,7 @@ mod tests {
             timeline: false,
             format: "markdown".to_string(),
             project_path: None,
+            time_range: None,
         };
         assert_eq!(options.parse_content_type_filter(), Some(ContentType::File));
     }
@@ -1063,6 +1383,7 @@ mod tests {
             timeline: true,
             format: "markdown".to_string(),
             project_path: None,
+            time_range: None,
         };
 
         let message = executor.format_no_results_message(&timeline_options);
@@ -1439,6 +1760,7 @@ mod tests {
             timeline: true,
             format: "markdown".to_string(),
             project_path: None,
+            time_range: None,
         };
 
         let result = executor.execute_timeline(&options).await;
@@ -1479,6 +1801,7 @@ mod tests {
             timeline: true,
             format: "markdown".to_string(),
             project_path: None,
+            time_range: None,
         };
 
         let result = executor.execute_timeline(&options).await;
@@ -1527,6 +1850,7 @@ mod tests {
             timeline: true,
             format: "markdown".to_string(),
             project_path: None,
+            time_range: None,
         };
 
         let result = executor.execute_timeline(&options).await;
@@ -1554,6 +1878,7 @@ mod tests {
             timeline: false,
             format: "markdown".to_string(),
             project_path: None,
+            time_range: None,
         };
 
         let result = executor.format_results(&items, &options);
@@ -1582,6 +1907,7 @@ mod tests {
             timeline: false,
             format: "json".to_string(),
             project_path: None,
+            time_range: None,
         };
 
         let result = executor.format_results(&items, &options);
@@ -1611,6 +1937,7 @@ mod tests {
             timeline: false,
             format: "text".to_string(),
             project_path: None,
+            time_range: None,
         };
 
         let result = executor.format_results(&items, &options);
@@ -1655,6 +1982,7 @@ mod tests {
             timeline: false,
             format: "markdown".to_string(),
             project_path: None,
+            time_range: None,
         };
         assert_eq!(options.parse_content_type_filter(), Some(ContentType::File));
 
@@ -1666,6 +1994,7 @@ mod tests {
             timeline: false,
             format: "markdown".to_string(),
             project_path: None,
+            time_range: None,
         };
         assert_eq!(options.parse_content_type_filter(), Some(ContentType::File));
 
@@ -1677,6 +2006,7 @@ mod tests {
             timeline: false,
             format: "markdown".to_string(),
             project_path: None,
+            time_range: None,
         };
         assert_eq!(options.parse_content_type_filter(), Some(ContentType::Session));
 
@@ -1688,6 +2018,7 @@ mod tests {
             timeline: false,
             format: "markdown".to_string(),
             project_path: None,
+            time_range: None,
         };
         assert_eq!(options.parse_content_type_filter(), Some(ContentType::Commit));
 
@@ -1699,6 +2030,7 @@ mod tests {
             timeline: false,
             format: "markdown".to_string(),
             project_path: None,
+            time_range: None,
         };
         assert_eq!(options.parse_content_type_filter(), None);
     }
@@ -2264,5 +2596,508 @@ mod tests {
         let expected = scored.similarity * scored.temporal_weight * scored.confidence_level.base_weight();
         assert!((scored.final_score - expected).abs() < f32::EPSILON,
             "Scoring formula should work correctly even with future timestamps");
+    }
+
+    // ==================== TimeRange Tests ====================
+
+    #[test]
+    fn test_time_range_none() {
+        let range = TimeRange::none();
+        assert!(range.is_empty());
+        assert!(range.after.is_none());
+        assert!(range.before.is_none());
+    }
+
+    #[test]
+    fn test_time_range_from_cli_args_none() {
+        let range = TimeRange::from_cli_args(None, None, None).unwrap();
+        assert!(range.is_empty());
+    }
+
+    #[test]
+    fn test_time_range_parse_iso8601() {
+        // Parse ISO 8601 date for 'after'
+        let range = TimeRange::from_cli_args(Some("2025-01-15"), None, None).unwrap();
+        assert!(range.after.is_some());
+        assert!(range.before.is_none());
+
+        // Verify the timestamp is roughly correct (January 15, 2025)
+        let after_ts = range.after.unwrap();
+        // 2025-01-15 00:00:00 UTC should be around 1736899200
+        assert!(after_ts >= 1736899200 - 86400 && after_ts <= 1736899200 + 86400);
+    }
+
+    #[test]
+    fn test_time_range_parse_relative_days() {
+        // Parse "7d" (7 days ago)
+        let range = TimeRange::from_cli_args(Some("7d"), None, None).unwrap();
+        assert!(range.after.is_some());
+
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        let after_ts = range.after.unwrap();
+
+        // Should be approximately 7 days ago
+        let expected = now - (7 * 86400);
+        assert!(after_ts >= expected - 100 && after_ts <= expected + 100);
+
+        // Parse "30d"
+        let range = TimeRange::from_cli_args(Some("30d"), None, None).unwrap();
+        let after_ts = range.after.unwrap();
+        let expected = now - (30 * 86400);
+        assert!(after_ts >= expected - 100 && after_ts <= expected + 100);
+    }
+
+    #[test]
+    fn test_time_range_parse_relative_weeks() {
+        // Parse "1w" (1 week ago)
+        let range = TimeRange::from_cli_args(Some("1w"), None, None).unwrap();
+        assert!(range.after.is_some());
+
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        let after_ts = range.after.unwrap();
+
+        // Should be approximately 7 days ago (1 week)
+        let expected = now - (7 * 86400);
+        assert!(after_ts >= expected - 100 && after_ts <= expected + 100);
+
+        // Parse "2w"
+        let range = TimeRange::from_cli_args(Some("2w"), None, None).unwrap();
+        let after_ts = range.after.unwrap();
+        let expected = now - (14 * 86400);
+        assert!(after_ts >= expected - 100 && after_ts <= expected + 100);
+    }
+
+    #[test]
+    fn test_time_range_parse_relative_months() {
+        // Parse "1m" (1 month ago, approximately 30 days)
+        let range = TimeRange::from_cli_args(Some("1m"), None, None).unwrap();
+        assert!(range.after.is_some());
+
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        let after_ts = range.after.unwrap();
+
+        // Should be approximately 30 days ago
+        let expected = now - (30 * 86400);
+        assert!(after_ts >= expected - 100 && after_ts <= expected + 100);
+    }
+
+    #[test]
+    fn test_time_range_parse_relative_years() {
+        // Parse "1y" (1 year ago, approximately 365 days)
+        let range = TimeRange::from_cli_args(Some("1y"), None, None).unwrap();
+        assert!(range.after.is_some());
+
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        let after_ts = range.after.unwrap();
+
+        // Should be approximately 365 days ago
+        let expected = now - (365 * 86400);
+        assert!(after_ts >= expected - 100 && after_ts <= expected + 100);
+    }
+
+    #[test]
+    fn test_time_range_max_age() {
+        // Test max_age parameter
+        let range = TimeRange::from_cli_args(None, None, Some(7)).unwrap();
+        assert!(range.after.is_some());
+        assert!(range.before.is_none());
+
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        let after_ts = range.after.unwrap();
+
+        // Should be approximately 7 days ago
+        let expected = now - (7 * 86400);
+        assert!(after_ts >= expected - 100 && after_ts <= expected + 100);
+    }
+
+    #[test]
+    fn test_time_range_max_age_overridden_by_after() {
+        // Test that explicit 'after' overrides max_age
+        let range = TimeRange::from_cli_args(Some("30d"), None, Some(7)).unwrap();
+        assert!(range.after.is_some());
+
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        let after_ts = range.after.unwrap();
+
+        // Should be approximately 30 days ago (from 'after', not max_age=7)
+        let expected = now - (30 * 86400);
+        assert!(after_ts >= expected - 100 && after_ts <= expected + 100);
+    }
+
+    #[test]
+    fn test_time_range_validation_after_before_order() {
+        // Test that after < before validation works
+        // Invalid: after is after before (using relative times that would result in this)
+        // "1d" is more recent than "7d", so this should fail
+        let result = TimeRange::from_cli_args(Some("1d"), Some("7d"), None);
+        // Note: "1d" means now - 1 day, "7d" means now - 7 days
+        // So after = now - 1 day, before = now - 7 days
+        // This means after > before, which is invalid
+        assert!(result.is_err());
+
+        // Valid: after is before before
+        let result = TimeRange::from_cli_args(Some("7d"), Some("1d"), None);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_time_range_contains() {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+
+        // Test with only 'after' set
+        let range = TimeRange {
+            after: Some(now - 86400), // 1 day ago
+            before: None,
+        };
+
+        assert!(!range.contains(now - 172800)); // 2 days ago - before the range
+        assert!(range.contains(now - 43200));  // 12 hours ago - within the range
+        assert!(range.contains(now));          // Now - within the range
+
+        // Test with only 'before' set
+        let range = TimeRange {
+            after: None,
+            before: Some(now - 43200), // 12 hours ago
+        };
+
+        assert!(range.contains(now - 86400)); // 1 day ago - within the range
+        assert!(!range.contains(now));         // Now - after the range
+
+        // Test with both 'after' and 'before' set
+        let range = TimeRange {
+            after: Some(now - 172800), // 2 days ago
+            before: Some(now - 43200), // 12 hours ago
+        };
+
+        assert!(!range.contains(now - 259200)); // 3 days ago - before the range
+        assert!(range.contains(now - 86400));   // 1 day ago - within the range
+        assert!(!range.contains(now));          // Now - after the range
+    }
+
+    #[test]
+    fn test_time_range_empty() {
+        // Empty range should contain all timestamps
+        let range = TimeRange::none();
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+
+        assert!(range.contains(0));
+        assert!(range.contains(now));
+        assert!(range.contains(now - 86400));
+        assert!(range.contains(now + 86400));
+    }
+
+    #[test]
+    fn test_time_range_invalid_format() {
+        // Test invalid time format (no suffix)
+        let result = TimeRange::from_cli_args(Some("7"), None, None);
+        assert!(result.is_err());
+
+        // Test invalid date format
+        let result = TimeRange::from_cli_args(Some("2025/01/15"), None, None);
+        assert!(result.is_err());
+
+        // Test invalid suffix
+        let result = TimeRange::from_cli_args(Some("7h"), None, None);
+        assert!(result.is_err());
+
+        // Test negative value
+        let result = TimeRange::from_cli_args(Some("-7d"), None, None);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_time_range_case_insensitive() {
+        // Test case insensitive suffix parsing
+        let range1 = TimeRange::from_cli_args(Some("7d"), None, None).unwrap();
+        let range2 = TimeRange::from_cli_args(Some("7D"), None, None).unwrap();
+
+        assert_eq!(range1.after, range2.after);
+
+        let range1 = TimeRange::from_cli_args(Some("1w"), None, None).unwrap();
+        let range2 = TimeRange::from_cli_args(Some("1W"), None, None).unwrap();
+
+        assert_eq!(range1.after, range2.after);
+    }
+
+    // ==================== TimeRange Boundary Tests ====================
+
+    #[test]
+    fn test_time_range_boundary_equal_timestamps() {
+        // Test boundary condition where after == before
+        // This should be rejected as invalid
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+
+        let result = TimeRange::from_cli_args(Some("7d"), Some("7d"), None);
+        assert!(result.is_err(), "Equal timestamps should be rejected");
+
+        // Test with explicit timestamps
+        let range = TimeRange {
+            after: Some(now - 86400),
+            before: Some(now - 86400),
+        };
+        // Note: This bypasses validation, but contains() should handle it
+        // Equal timestamps means an empty range (no timestamp can be >= x AND < x)
+        assert!(!range.contains(now - 86400));
+        assert!(!range.contains(now));
+    }
+
+    #[test]
+    fn test_time_range_boundary_zero_timestamp() {
+        // Test behavior with timestamp = 0
+        let range = TimeRange {
+            after: Some(0),
+            before: Some(86400), // 1 day after epoch
+        };
+
+        assert!(range.contains(0));           // t=0 is included (>= after)
+        assert!(range.contains(43200));        // t=12h is included
+        assert!(!range.contains(86400));       // t=1d is excluded (< before)
+
+        // Test with only after = 0
+        let range = TimeRange {
+            after: Some(0),
+            before: None,
+        };
+        assert!(range.contains(0));
+        assert!(range.contains(86400));
+    }
+
+    #[test]
+    fn test_time_range_symbol_always_passes() {
+        // Test that Symbol type (timestamp = 0) passes filtering
+        // as it represents current code
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+
+        // Create a range that would exclude everything from the past week
+        let range = TimeRange {
+            after: Some(now + 86400), // Future time
+            before: None,
+        };
+
+        // Symbol with timestamp = 0 should still pass
+        // (This is the responsibility of the caller, but we test the logic here)
+        assert!(!range.contains(now - 86400)); // Normal timestamp filtered
+        assert!(!range.contains(0));           // But timestamp=0 also filtered by TimeRange
+        // The special Symbol handling is done in enhance_results()
+    }
+
+    // ==================== Enhance Results Integration Tests ====================
+
+    #[tokio::test]
+    async fn test_enhance_results_with_time_range_filter() {
+        let executor = create_test_executor();
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+
+        // Store test sessions with different timestamps
+        let old_session = Session {
+            id: "old-session-time-test".to_string(),
+            title: Some("Old Session".to_string()),
+            project_path: "/test/project".to_string(),
+            started_at: chrono::Utc::now() - chrono::Duration::days(100),
+            ended_at: None,
+            message_count: 1,
+            indexed: true,
+        };
+        executor.storage.store_session(&old_session).unwrap();
+
+        let recent_session = Session {
+            id: "recent-session-time-test".to_string(),
+            title: Some("Recent Session".to_string()),
+            project_path: "/test/project".to_string(),
+            started_at: chrono::Utc::now() - chrono::Duration::days(3),
+            ended_at: None,
+            message_count: 1,
+            indexed: true,
+        };
+        executor.storage.store_session(&recent_session).unwrap();
+
+        // Create raw results (order: old first, then recent)
+        let raw_results = vec![
+            ("old-session-time-test".to_string(), 0.90), // High similarity but old
+            ("recent-session-time-test".to_string(), 0.70), // Lower similarity but recent
+        ];
+
+        // Query with time range (last 7 days)
+        let mut options = create_test_options();
+        options.time_range = Some(TimeRange {
+            after: Some(now - (7 * 86400)),
+            before: None,
+        });
+
+        let enhanced = executor.enhance_results(&raw_results, &options).await.unwrap();
+
+        // Old session should be filtered out
+        assert_eq!(enhanced.len(), 1);
+        assert_eq!(enhanced[0].id, "recent-session-time-test");
+    }
+
+    #[tokio::test]
+    async fn test_enhance_results_time_range_with_symbol() {
+        let executor = create_test_executor();
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+
+        // Store a file and symbol
+        let file = File {
+            id: "time-test-file".to_string(),
+            project_path: "/test/project".to_string(),
+            file_path: "src/test.rs".to_string(),
+            language: Some("rust".to_string()),
+            kind: FileKind::Source,
+            modified_at: chrono::Utc::now() - chrono::Duration::days(100), // Old file
+            size: 1024,
+            content_hash: "hash".to_string(),
+            indexed: true,
+        };
+        executor.storage.store_file(&file).unwrap();
+
+        use crate::models::{Symbol, SymbolKind};
+        let symbol = Symbol {
+            id: "time-test-symbol".to_string(),
+            file_id: "time-test-file".to_string(),
+            name: "test_func".to_string(),
+            kind: SymbolKind::Function,
+            start_line: 1,
+            end_line: 5,
+            doc_comment: None,
+            code: "fn test_func() {}".to_string(),
+            parent_id: None,
+        };
+        executor.storage.store_symbol(&symbol).unwrap();
+
+        // Create raw results
+        let raw_results = vec![
+            ("time-test-file".to_string(), 0.85),
+            ("time-test-symbol".to_string(), 0.80),
+        ];
+
+        // Query with time range (last 7 days)
+        let mut options = create_test_options();
+        options.time_range = Some(TimeRange {
+            after: Some(now - (7 * 86400)),
+            before: None,
+        });
+
+        let enhanced = executor.enhance_results(&raw_results, &options).await.unwrap();
+
+        // File should be filtered out (too old), but Symbol should pass
+        assert_eq!(enhanced.len(), 1);
+        assert_eq!(enhanced[0].id, "time-test-symbol");
+        assert_eq!(enhanced[0].content_type, ContentType::Symbol);
+    }
+
+    #[tokio::test]
+    async fn test_enhance_results_time_range_both_bounds() {
+        let executor = create_test_executor();
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+
+        // Store multiple sessions with different timestamps
+        for (days_offset, id) in [(100, "very-old"), (30, "old"), (10, "middle"), (3, "recent"), (1, "very-recent")] {
+            let session = Session {
+                id: format!("time-range-{}-test", id),
+                title: Some(format!("Session {}", id)),
+                project_path: "/test/project".to_string(),
+                started_at: chrono::Utc::now() - chrono::Duration::days(days_offset),
+                ended_at: None,
+                message_count: 1,
+                indexed: true,
+            };
+            executor.storage.store_session(&session).unwrap();
+        }
+
+        // Create raw results
+        let raw_results = vec![
+            ("time-range-very-old-test".to_string(), 0.90),
+            ("time-range-old-test".to_string(), 0.85),
+            ("time-range-middle-test".to_string(), 0.80),
+            ("time-range-recent-test".to_string(), 0.75),
+            ("time-range-very-recent-test".to_string(), 0.70),
+        ];
+
+        // Query with both bounds (5 to 15 days ago)
+        let mut options = create_test_options();
+        options.time_range = Some(TimeRange {
+            after: Some(now - (15 * 86400)), // 15 days ago
+            before: Some(now - (5 * 86400)),  // 5 days ago
+        });
+
+        let enhanced = executor.enhance_results(&raw_results, &options).await.unwrap();
+
+        // Only "middle" (10 days) should be in range
+        assert_eq!(enhanced.len(), 1);
+        assert_eq!(enhanced[0].id, "time-range-middle-test");
+    }
+
+    #[tokio::test]
+    async fn test_enhance_results_time_range_empty_results() {
+        let executor = create_test_executor();
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+
+        // Store an old session
+        let session = Session {
+            id: "empty-time-range-test".to_string(),
+            title: Some("Old Session".to_string()),
+            project_path: "/test/project".to_string(),
+            started_at: chrono::Utc::now() - chrono::Duration::days(100),
+            ended_at: None,
+            message_count: 1,
+            indexed: true,
+        };
+        executor.storage.store_session(&session).unwrap();
+
+        let raw_results = vec![("empty-time-range-test".to_string(), 0.90)];
+
+        // Query with time range that excludes everything
+        let mut options = create_test_options();
+        options.time_range = Some(TimeRange {
+            after: Some(now - (3 * 86400)), // 3 days ago
+            before: Some(now - (1 * 86400)),  // 1 day ago
+        });
+
+        let enhanced = executor.enhance_results(&raw_results, &options).await.unwrap();
+
+        // Should return empty results (old session filtered)
+        assert_eq!(enhanced.len(), 0);
     }
 }

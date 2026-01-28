@@ -542,6 +542,32 @@ impl McpServer {
         Ok(value)
     }
 
+    /// Extracts and validates time range parameters from tool arguments.
+    ///
+    /// # Arguments
+    ///
+    /// * `args` - The tool arguments as a JSON map
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(Some(TimeRange))` if any time filter is specified, `Ok(None)` otherwise.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the time format is invalid.
+    fn extract_time_range(args: &serde_json::Map<String, Value>) -> Result<Option<crate::query::TimeRange>> {
+        let after = args.get("after").and_then(|v| v.as_str());
+        let before = args.get("before").and_then(|v| v.as_str());
+        let max_age = args.get("max_age").and_then(|v| v.as_u64());
+
+        // Only return Some if at least one parameter is specified
+        if after.is_some() || before.is_some() || max_age.is_some() {
+            Ok(Some(crate::query::TimeRange::from_cli_args(after, before, max_age)?))
+        } else {
+            Ok(None)
+        }
+    }
+
     /// Creates a standardized "no index found" error response.
     ///
     /// This response is returned when the HNSW index doesn't exist for the project.
@@ -578,6 +604,16 @@ impl McpServer {
             "content": [{
                 "type": "text",
                 "text": format!("{}{}", MSG_INDEX_ERROR, error)
+            }]
+        })
+    }
+
+    /// Generic error response helper.
+    fn error_response(msg: String) -> Value {
+        json!({
+            "content": [{
+                "type": "text",
+                "text": msg
             }]
         })
     }
@@ -760,7 +796,58 @@ impl McpServer {
         }
     }
 
-    /// Starts the MCP server and begins processing JSON-RPC requests.
+    /// Execute search with time range filtering using QueryExecutor.
+    ///
+    /// This method uses the full QueryExecutor pipeline with time-aware scoring
+    /// and time range filtering.
+    fn execute_search_with_time_range(
+        &self,
+        query: &str,
+        top_k: usize,
+        content_type: Option<ContentType>,
+        time_range: crate::query::TimeRange,
+    ) -> Result<Value> {
+        // Create a tokio runtime for async execution
+        let runtime = tokio::runtime::Runtime::new()
+            .map_err(|e| RagError::Validation(format!("Failed to create runtime: {}", e)))?;
+
+        // Create QueryOptions with time range
+        let options = crate::query::QueryOptions {
+            query: query.to_string(),
+            content_type: content_type.map(|ct| format!("{:?}", ct)),
+            top_k,
+            timeline: false,
+            format: "markdown".to_string(),
+            project_path: None,
+            time_range: Some(time_range),
+        };
+
+        // Create QueryExecutor
+        let mut executor = match crate::query::QueryExecutor::from_options(&options) {
+            Ok(exec) => exec,
+            Err(e) => {
+                return Ok(Self::error_response(format!("Failed to create executor: {}", e)));
+            }
+        };
+
+        // Execute the query
+        let result = match runtime.block_on(executor.execute(&options)) {
+            Ok(r) => r,
+            Err(e) => {
+                return Ok(Self::error_response(format!("Query failed: {}", e)));
+            }
+        };
+
+        // Return the formatted result
+        Ok(json!({
+            "content": [{
+                "type": "text",
+                "text": result
+            }]
+        }))
+    }
+
+    /// Error response helper.
     ///
     /// This method runs the server's main loop, which:
     /// 1. Reads JSON-RPC requests from standard input
@@ -930,7 +1017,14 @@ impl McpServer {
     fn call_rag_query(&self, args: &serde_json::Map<String, Value>) -> Result<Value> {
         let query = Self::extract_query(args)?;
         let top_k = Self::extract_top_k(args, DEFAULT_TOP_K_GENERAL)?;
-        self.execute_search(&query, top_k, None)
+        let time_range = Self::extract_time_range(args)?;
+
+        // If time range is specified, use QueryExecutor for proper filtering
+        if let Some(range) = time_range {
+            self.execute_search_with_time_range(&query, top_k, None, range)
+        } else {
+            self.execute_search(&query, top_k, None)
+        }
     }
 
     /// Call rag_search_session tool - searches only sessions.
@@ -1075,6 +1169,19 @@ impl McpServer {
                         "default": DEFAULT_TOP_K_GENERAL,
                         "minimum": 1,
                         "maximum": 100
+                    },
+                    "after": {
+                        "type": "string",
+                        "description": "Filter results after this time. Relative time (e.g., '7d', '1w', '1m') or ISO 8601 date (e.g., '2025-01-01'). Requires suffix for relative time."
+                    },
+                    "before": {
+                        "type": "string",
+                        "description": "Filter results before this time. Relative time (e.g., '7d', '1w', '1m') or ISO 8601 date (e.g., '2025-01-01'). Requires suffix for relative time."
+                    },
+                    "max_age": {
+                        "type": "number",
+                        "description": "Maximum age of results in days (e.g., 7 for last 7 days). Sets the 'after' filter to now - max_age days.",
+                        "minimum": 1
                     }
                 },
                 "required": ["query"]

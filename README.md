@@ -197,6 +197,11 @@ claude-rag query --timeline "login authentication"
 claude-rag query --type commit "OAuth2 migration"
 claude-rag query --file "src/auth/login.rs" --show-diffs
 
+# ⭐ Time range filtering - filter results by time
+claude-rag query "database" --max-age 7          # Last 7 days
+claude-rag query "auth" --after "2025-01-01"     # Since a date
+claude-rag query "bug" --after "1w" --before "7d" # Time range
+
 # Output example:
 # 🎯 Found 3 relevant contexts
 #

@@ -64,6 +64,15 @@ enum Commands {
         /// Output format
         #[arg(short, long, default_value = "markdown")]
         format: String,
+        /// Filter results after this time (e.g., "7d", "1w", "2025-01-01")
+        #[arg(long)]
+        after: Option<String>,
+        /// Filter results before this time (e.g., "7d", "1w", "2025-01-01")
+        #[arg(long)]
+        before: Option<String>,
+        /// Maximum age of results in days (e.g., 7 for last 7 days)
+        #[arg(long, value_name = "DAYS")]
+        max_age: Option<u64>,
     },
     /// Check status
     Status,
@@ -99,8 +108,8 @@ async fn main() -> Result<()> {
         Commands::Daemon { daemon_cmd } => {
             handle_daemon(daemon_cmd)?;
         }
-        Commands::Query { query, r#type, top_k, timeline, format } => {
-            handle_query(query, r#type, top_k, timeline, format)?;
+        Commands::Query { query, r#type, top_k, timeline, format, after, before, max_age } => {
+            handle_query(query, r#type, top_k, timeline, format, after, before, max_age)?;
         }
         Commands::Status => {
             handle_status()?;
@@ -215,10 +224,37 @@ fn handle_daemon(daemon_cmd: DaemonCommands) -> Result<()> {
     Ok(())
 }
 
-fn handle_query(query: String, r#type: Option<String>, top_k: usize, timeline: bool, format: String) -> Result<()> {
+fn handle_query(
+    query: String,
+    r#type: Option<String>,
+    top_k: usize,
+    timeline: bool,
+    format: String,
+    after: Option<String>,
+    before: Option<String>,
+    max_age: Option<u64>,
+) -> Result<()> {
+    // Parse time range if specified
+    let time_range = if after.is_some() || before.is_some() || max_age.is_some() {
+        Some(claude_rag::query::TimeRange::from_cli_args(
+            after.as_deref(),
+            before.as_deref(),
+            max_age,
+        )?)
+    } else {
+        None
+    };
+
     // Use tokio runtime for async query execution
     let runtime = tokio::runtime::Runtime::new()?;
-    let result = runtime.block_on(claude_rag::execute_query(query, r#type, top_k, timeline, format))?;
+    let result = runtime.block_on(claude_rag::execute_query_with_time_range(
+        query,
+        r#type,
+        top_k,
+        timeline,
+        format,
+        time_range,
+    ))?;
     println!("{}", result);
     Ok(())
 }

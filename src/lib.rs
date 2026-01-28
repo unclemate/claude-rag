@@ -38,5 +38,10 @@ pub use ast::{AstParser, SupportedLanguage};
 pub use config::EmbeddingConfig;
 pub use error::{Result, RagError};
 pub use parser::{ParsedSession, SessionParser};
-pub use query::{execute_query, QueryExecutor, QueryOptions, QueryStats};
+pub use query::{
+    execute_query, execute_query_with_time_range, QueryExecutor, QueryOptions, QueryStats,
+};
+
+// Re-export TimeRange at the crate root for convenience
+pub use query::TimeRange;
 pub use results::{EnhancedItem, GitInfo, SupersededInfo};

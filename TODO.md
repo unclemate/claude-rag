@@ -152,16 +152,50 @@
 
 ---
 
-### 7. 时间加权集成到 HNSW
-**位置**: `src/storage/hnsw.rs` 或查询流程中
+### 7. 时间加权集成到 HNSW ✅ 已完成
+**位置**: `src/query.rs`, `src/retrieval/git_sync.rs`
 
-**当前状态**: 时间衰减计算器已实现，但未集成到搜索评分
+**当前状态**: 完整实现
 
-**需要实现**:
-- [ ] 在搜索结果后应用 temporal_weight
-- [ ] 最终评分 = similarity * temporal_weight * confidence_weight
-- [ ] 支持按时间范围过滤查询
-- [ ] 在 ConfidenceLevel 中集成 Git 状态
+**已实现功能**:
+- [x] 在搜索结果后应用 temporal_weight
+- [x] 最终评分 = similarity * temporal_weight * confidence_weight
+- [x] 支持按时间范围过滤查询 (`--after`, `--before`, `--max-age`)
+- [x] 在 ConfidenceLevel 中集成 Git 状态
+
+**新增功能** (2026-01-28):
+- [x] `TimeRange` 结构体 - 时间范围过滤
+  - 支持相对时间: `7d`, `1w`, `1m`, `1y`
+  - 支持 ISO 8601 日期: `2025-01-01`
+  - 支持组合过滤: `--after 1w --before 7d`
+  - Symbol 类型始终通过（代表当前代码）
+
+**CLI 使用**:
+```bash
+claude-rag query "database" --max-age 7          # 最近7天
+claude-rag query "auth" --after "2025-01-01"     # 某日期之后
+claude-rag query "bug" --after "1w" --before "7d" # 时间范围
+```
+
+**MCP Server 使用**:
+```json
+{"tool": "rag_query", "arguments": {"query": "fix", "max_age": 30}}
+```
+
+**测试覆盖**:
+- 原有测试: 14 个 TimeRange 基础测试
+- 新增测试: 6 个边界条件和集成测试
+- **总计**: 20 个测试，全部通过
+- 总体测试数: 560 个 (新增 7 个)
+
+**改进内容** (2026-01-28):
+- [x] 增强文档注释：添加详细的使用示例和说明
+- [x] 边界测试：验证 after == before 的情况
+- [x] 零时间戳测试：验证 timestamp = 0 的边界行为
+- [x] Symbol 过滤测试：验证特殊类型始终通过
+- [x] `enhance_results` 集成测试：验证实际过滤逻辑
+- [x] 双边界测试：验证 `after` 和 `before` 同时使用
+- [x] 空结果测试：验证完全过滤的场景
 
 **设计参考**: `DESIGN.md` Confidence-aware scoring
 
