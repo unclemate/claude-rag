@@ -16,9 +16,10 @@ use crate::models::ContentType;
 #[allow(unused_imports)]
 use crate::models::{Commit, File, Message, Session};
 use crate::models::file::FileKind;
-use crate::retrieval::{ConfidenceScore, FeatureTimeline, TimeDecay};
+use crate::retrieval::{ConfidenceScore, FeatureTimeline, GitSync, TimeDecay};
 use crate::results::{EnhancedItem, GitInfo};
 use crate::storage::{hnsw::HnswIndex, StorageManager};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -153,6 +154,8 @@ pub struct QueryExecutor {
     index: Option<HnswIndex>,
     /// Configuration for confidence and retrieval settings.
     config: Config,
+    /// Git status synchronizer (optional, for non-Git projects).
+    git_sync: Option<GitSync>,
 }
 
 impl QueryExecutor {
@@ -185,12 +188,22 @@ impl QueryExecutor {
             _ => None,
         };
 
+        // Try to initialize Git sync (optional, fails gracefully for non-Git projects)
+        let git_sync = match GitSync::new(&project_path, 60) {
+            Ok(sync) => Some(sync),
+            Err(_) => {
+                tracing::debug!("Git sync not available for this project");
+                None
+            }
+        };
+
         Ok(Self {
             project_path,
             storage,
             indexer,
             index: None,
             config,
+            git_sync,
         })
     }
 
@@ -247,7 +260,7 @@ impl QueryExecutor {
         }
 
         // Enhance results with metadata and time-aware scoring
-        let enhanced_results = self.enhance_results(&raw_results, options)?;
+        let enhanced_results = self.enhance_results(&raw_results, options).await?;
 
         // Format output
         self.format_results(&enhanced_results, options)
@@ -305,24 +318,27 @@ impl QueryExecutor {
     }
 
     /// Enhance raw search results with metadata and time-aware scoring.
-    fn enhance_results(
+    async fn enhance_results(
         &self,
         raw_results: &[(String, f32)],
         options: &QueryOptions,
     ) -> Result<Vec<EnhancedItem>> {
-        let mut enhanced = Vec::new();
-
-        for (id, similarity) in raw_results {
-            // Get item from storage
-            let item = self.get_enhanced_item(id, *similarity)?;
-
-            // Apply time-aware scoring
-            let scored_item = self.apply_time_aware_scoring(item)?;
-
-            enhanced.push(scored_item);
+        if raw_results.is_empty() {
+            return Ok(Vec::new());
         }
 
+        // First pass: collect all enhanced items
+        let mut items: Vec<EnhancedItem> = Vec::new();
+        for (id, similarity) in raw_results {
+            let item = self.get_enhanced_item(id, *similarity)?;
+            items.push(item);
+        }
+
+        // Apply batch time-aware scoring with Git status checking
+        let scored_items = self.apply_time_aware_scoring_batch(items).await?;
+
         // Sort by final score
+        let mut enhanced = scored_items;
         enhanced.sort_by(|a, b| {
             b.final_score
                 .partial_cmp(&a.final_score)
@@ -435,6 +451,10 @@ impl QueryExecutor {
     }
 
     /// Apply time-aware scoring to an enhanced item.
+    ///
+    /// This is a simplified version used for testing basic time-aware scoring logic
+    /// without Git status checking. For production use, see `apply_time_aware_scoring_batch`.
+    #[allow(dead_code)] // Used in tests for basic scoring without Git integration
     fn apply_time_aware_scoring(&self, mut item: EnhancedItem) -> Result<EnhancedItem> {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -468,6 +488,137 @@ impl QueryExecutor {
         item.is_current = age_days == 0;
 
         Ok(item)
+    }
+
+    /// Apply batch time-aware scoring with Git status checking.
+    ///
+    /// This method processes multiple items at once, checking Git status
+    /// in a single batch operation for improved performance.
+    async fn apply_time_aware_scoring_batch(&self, items: Vec<EnhancedItem>) -> Result<Vec<EnhancedItem>> {
+        if items.is_empty() {
+            return Ok(items);
+        }
+
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+
+        // Collect file paths that need Git status checking
+        let mut file_paths_to_check: Vec<String> = Vec::new();
+
+        for item in &items {
+            if matches!(item.content_type, ContentType::File | ContentType::Symbol) {
+                if let Some(file_path) = self.extract_file_path(item) {
+                    file_paths_to_check.push(file_path);
+                }
+            }
+        }
+
+        // Batch execute Git checks - directly await without creating runtime
+        let git_statuses: HashMap<String, bool> = if !file_paths_to_check.is_empty() {
+            if let Some(ref git_sync) = self.git_sync {
+                let results = git_sync.batch_check_files(&file_paths_to_check).await?;
+
+                // Convert to HashMap<file_path, is_current>
+                results
+                    .into_iter()
+                    .map(|(path, status)| {
+                        let is_current = matches!(status, crate::retrieval::GitSyncStatus::Current);
+                        (path, is_current)
+                    })
+                    .collect()
+            } else {
+                HashMap::new()
+            }
+        } else {
+            HashMap::new()
+        };
+
+        // Apply scoring to each item
+        items
+            .into_iter()
+            .map(|mut item| {
+                let age_days = if item.timestamp > 0 {
+                    (now - item.timestamp) / 86400
+                } else {
+                    0
+                };
+
+                // Check Git status
+                let git_is_current = if matches!(item.content_type, ContentType::File | ContentType::Symbol) {
+                    if let Some(file_path) = self.extract_file_path(&item) {
+                        match git_statuses.get(&file_path) {
+                            Some(&is_current) => is_current,
+                            None => {
+                                // Git status not found - this can happen if:
+                                // 1. Git sync is disabled (non-Git repo)
+                                // 2. File path extraction failed
+                                // 3. Batch check didn't include this file
+                                tracing::debug!(
+                                    "Git status not found for file: {}, defaulting to current",
+                                    file_path
+                                );
+                                true
+                            }
+                        }
+                    } else {
+                        true
+                    }
+                } else {
+                    true
+                };
+
+                // Use Git status to calculate confidence
+                let confidence = ConfidenceScore::from_content_type_with_git(
+                    item.content_type,
+                    age_days,
+                    git_is_current,
+                );
+
+                let decay_rate = self.config.confidence.decay_rate;
+                let temporal_weight = TimeDecay::calculate(age_days, decay_rate);
+                let final_score = item.similarity * temporal_weight;
+
+                item.confidence_level = confidence.level;
+                item.temporal_weight = temporal_weight;
+                item.final_score = final_score;
+                item.age_description = Self::format_age(age_days);
+                item.is_current = git_is_current;
+                item.is_deprecated = !git_is_current;
+
+                Ok(item)
+            })
+            .collect()
+    }
+
+    /// Extract file path from an EnhancedItem.
+    ///
+    /// Tries multiple strategies to get the file path:
+    /// 1. From storage (File or Symbol)
+    /// 2. From content parsing (backup)
+    fn extract_file_path(&self, item: &EnhancedItem) -> Option<String> {
+        // Try to get from file storage
+        if let Ok(Some(file)) = self.storage.get_file(&item.id) {
+            return Some(file.file_path);
+        }
+
+        // Try to get from symbol storage
+        if let Ok(Some(symbol)) = self.storage.get_symbol(&item.id) {
+            if let Ok(Some(file)) = self.storage.get_file(&symbol.file_id) {
+                return Some(file.file_path);
+            }
+        }
+
+        // Parse from content (backup for File type)
+        if item.content_type == ContentType::File {
+            // Content format: "Kind: path" e.g., "Source: src/main.rs"
+            if let Some((_, path)) = item.content.split_once(": ") {
+                return Some(path.to_string());
+            }
+        }
+
+        None
     }
 
     /// Format age as human-readable string.
@@ -1195,8 +1346,8 @@ mod tests {
         assert_eq!(scored_session.confidence_level, crate::retrieval::ConfidenceLevel::Low);
     }
 
-    #[test]
-    fn test_enhance_results_sorting() {
+    #[tokio::test]
+    async fn test_enhance_results_sorting() {
         let executor = create_test_executor();
 
         // Store test items
@@ -1229,7 +1380,7 @@ mod tests {
         ];
 
         let options = create_test_options();
-        let enhanced = executor.enhance_results(&raw_results, &options).unwrap();
+        let enhanced = executor.enhance_results(&raw_results, &options).await.unwrap();
 
         // Results should be sorted by final_score (which considers both similarity and temporal weight)
         assert_eq!(enhanced.len(), 2);
@@ -1239,8 +1390,8 @@ mod tests {
         assert_eq!(enhanced[1].id, "session-1"); // Old session penalized by time decay
     }
 
-    #[test]
-    fn test_enhance_respects_top_k() {
+    #[tokio::test]
+    async fn test_enhance_respects_top_k() {
         let executor = create_test_executor();
 
         // Store multiple sessions
@@ -1264,7 +1415,7 @@ mod tests {
         let mut options = create_test_options();
         options.top_k = 3;
 
-        let enhanced = executor.enhance_results(&raw_results, &options).unwrap();
+        let enhanced = executor.enhance_results(&raw_results, &options).await.unwrap();
         assert_eq!(enhanced.len(), 3); // Should respect top_k limit
     }
 
@@ -1547,12 +1698,12 @@ mod tests {
 
     // ==================== Edge Case Tests ====================
 
-    #[test]
-    fn test_enhance_results_empty() {
+    #[tokio::test]
+    async fn test_enhance_results_empty() {
         let executor = create_test_executor();
         let options = create_test_options();
 
-        let result = executor.enhance_results(&[], &options);
+        let result = executor.enhance_results(&[], &options).await;
         assert!(result.is_ok());
         assert!(result.unwrap().is_empty());
     }

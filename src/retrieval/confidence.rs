@@ -69,6 +69,57 @@ impl ConfidenceScore {
             weight: level.base_weight(),
         }
     }
+
+    /// Calculate confidence from content type, age, and Git status.
+    ///
+    /// This method considers whether the content matches the current Git HEAD
+    /// when determining confidence for files and symbols.
+    ///
+    /// # Arguments
+    ///
+    /// * `content_type` - Type of content
+    /// * `age_days` - Age in days since indexing
+    /// * `is_git_current` - Whether content matches Git HEAD
+    ///
+    /// # Returns
+    ///
+    /// Returns a confidence score with appropriate level and weight.
+    pub fn from_content_type_with_git(
+        content_type: ContentType,
+        age_days: i64,
+        is_git_current: bool,
+    ) -> Self {
+        let level = match content_type {
+            ContentType::File | ContentType::Symbol => {
+                if is_git_current {
+                    // Current code has highest confidence
+                    ConfidenceLevel::Highest
+                } else {
+                    // Deprecated code has low confidence
+                    ConfidenceLevel::Low
+                }
+            }
+            ContentType::Commit | ContentType::GitDiff => {
+                // Git commits have high confidence
+                ConfidenceLevel::High
+            }
+            ContentType::Message | ContentType::Session => {
+                // Sessions decay over time
+                if age_days <= 7 {
+                    ConfidenceLevel::Medium
+                } else if age_days <= 30 {
+                    ConfidenceLevel::Low
+                } else {
+                    ConfidenceLevel::Lowest
+                }
+            }
+        };
+
+        Self {
+            level,
+            weight: level.base_weight(),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -91,6 +142,50 @@ mod tests {
         assert_eq!(score.level, ConfidenceLevel::Medium);
 
         let score = ConfidenceScore::from_content_type(ContentType::Message, 40);
+        assert_eq!(score.level, ConfidenceLevel::Lowest);
+    }
+
+    #[test]
+    fn test_confidence_from_content_type_with_git() {
+        // Current file should have highest confidence
+        let score =
+            ConfidenceScore::from_content_type_with_git(ContentType::File, 0, true);
+        assert_eq!(score.level, ConfidenceLevel::Highest);
+        assert_eq!(score.weight, 1.2);
+
+        // Deprecated file should have low confidence
+        let score =
+            ConfidenceScore::from_content_type_with_git(ContentType::File, 0, false);
+        assert_eq!(score.level, ConfidenceLevel::Low);
+        assert_eq!(score.weight, 0.6);
+
+        // Current symbol should have highest confidence
+        let score =
+            ConfidenceScore::from_content_type_with_git(ContentType::Symbol, 10, true);
+        assert_eq!(score.level, ConfidenceLevel::Highest);
+
+        // Deprecated symbol should have low confidence
+        let score =
+            ConfidenceScore::from_content_type_with_git(ContentType::Symbol, 10, false);
+        assert_eq!(score.level, ConfidenceLevel::Low);
+
+        // Git commits are unaffected by git_current parameter
+        let score =
+            ConfidenceScore::from_content_type_with_git(ContentType::Commit, 5, true);
+        assert_eq!(score.level, ConfidenceLevel::High);
+
+        let score =
+            ConfidenceScore::from_content_type_with_git(ContentType::Commit, 5, false);
+        assert_eq!(score.level, ConfidenceLevel::High);
+
+        // Recent session with medium confidence
+        let score =
+            ConfidenceScore::from_content_type_with_git(ContentType::Session, 3, true);
+        assert_eq!(score.level, ConfidenceLevel::Medium);
+
+        // Old session with lowest confidence
+        let score =
+            ConfidenceScore::from_content_type_with_git(ContentType::Message, 40, true);
         assert_eq!(score.level, ConfidenceLevel::Lowest);
     }
 }

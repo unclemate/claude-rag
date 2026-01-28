@@ -145,6 +145,20 @@ pub struct GitConfig {
     pub conventional_commits: bool,
     /// Extract BREAKING CHANGE.
     pub extract_breaking_changes: bool,
+    /// Enable persistent cache for Git sync.
+    #[serde(default = "default_enable_persistent_cache")]
+    pub enable_persistent_cache: bool,
+    /// Cache persist interval in seconds (default: 300 = 5 minutes).
+    #[serde(default = "default_cache_persist_interval")]
+    pub cache_persist_interval: u64,
+}
+
+fn default_enable_persistent_cache() -> bool {
+    true
+}
+
+fn default_cache_persist_interval() -> u64 {
+    300
 }
 
 impl Default for GitConfig {
@@ -155,6 +169,8 @@ impl Default for GitConfig {
             include_diff_content: true,
             conventional_commits: true,
             extract_breaking_changes: true,
+            enable_persistent_cache: true,
+            cache_persist_interval: 300,
         }
     }
 }

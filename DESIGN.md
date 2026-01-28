@@ -84,7 +84,8 @@ Develop a Rust tool to build a **complete time-aware RAG knowledge base** for pr
   ├── db/                  # sled database files
   │   ├── sled-data
   │   └── ...
-  └── hnsw.bin             # HNSW index snapshot
+  ├── hnsw.bin             # HNSW index snapshot
+  └── git_sync_cache.json  # ⭐ Git sync persistent cache (two-tier caching)
   ```
 
 - **Global Config** (`~/.claude/rag/config.toml`):
@@ -284,6 +285,14 @@ Claude Code session starts
 - Calculate confidence levels based on content type and timestamp
 - Temporal weight calculation with decay
 - Git state synchronization (check if code matches HEAD)
+- **GitSync module with two-tier persistent caching** ⭐
+  - L1: Memory LRU cache for hot data (default: 1000 entries)
+  - L2: Disk persistent cache (default: 10000 entries)
+  - HEAD change detection and automatic cache invalidation
+  - File content hashing (SHA-256) for modification detection
+  - Background persistence task (5-minute interval)
+  - Graceful degradation for persistence failures
+  - Cache file: `{projectPath}/.rag/git_sync_cache.json`
 
 ### 13. Time Decay Calculator (`src/time_decay.rs`) ⭐
 - Exponential decay based on age
@@ -730,6 +739,7 @@ src/
 │   ├── mod.rs
 │   ├── confidence.rs    # Confidence level calculation
 │   ├── decay.rs         # Temporal decay calculator
+│   ├── git_sync.rs      # ⭐ Git state sync with persistent caching
 │   └── timeline.rs      # Timeline builder
 │
 ├── embedding.rs         # Zhipu AI embedding-3 API client
@@ -788,6 +798,7 @@ skills/
 | **`src/retrieval/`** | **⭐ Time-aware retrieval (modular)** |
 | `src/retrieval/confidence.rs` | Confidence level (5 levels) |
 | `src/retrieval/decay.rs` | Temporal decay calculator |
+| `src/retrieval/git_sync.rs` | ⭐ Git state sync with two-tier persistent caching |
 | `src/retrieval/timeline.rs` | Timeline builder |
 | `src/embedding.rs` | Zhipu AI embedding-3 API client |
 | `src/parser.rs` | Session JSONL parsing |
@@ -1257,3 +1268,225 @@ impl Indexer {
 - `src/results.rs` - Enhanced result structures
 - `src/formatter.rs` - Result formatting
 - `src/mcp.rs` - Extend MCP interface
+
+---
+
+## Git State Synchronization Architecture ⭐
+
+### Overview
+
+Git state synchronization provides accurate tracking of whether indexed content matches the current Git HEAD, enabling proper `is_current` and `is_deprecated` marking in query results.
+
+### Two-Tier Caching System
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                        GitSync Cache Architecture                       │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│  ┌─────────────────────────────────────────────────────────────────┐    │
+│  │  L1: Memory Cache (LRU)                                         │    │
+│  │  ├─ Fast access to hot data                                    │    │
+│  │  ├─ Default: 1000 entries                                      │    │
+│  │  └─ In-memory only, lost on restart                            │    │
+│  └─────────────────────────────────────────────────────────────────┘    │
+│                              │ Promote on L1 miss                      │
+│                              ▼                                         │
+│  ┌─────────────────────────────────────────────────────────────────┐    │
+│  │  L2: Persistent Cache (Disk)                                    │    │
+│  │  ├─ Survives program restarts                                  │    │
+│  │  ├─ Default: 10000 entries                                     │    │
+│  │  ├─ Stored: .rag/git_sync_cache.json                           │    │
+│  │  └─ Atomic write (temp file + rename)                          │    │
+│  └─────────────────────────────────────────────────────────────────┘    │
+│                                                                          │
+│  ┌─────────────────────────────────────────────────────────────────┐    │
+│  │  Background Persistence Task                                    │    │
+│  │  ├─ Runs every 5 minutes                                       │    │
+│  │  ├─ Only writes if dirty flag is set                           │    │
+│  │  └─ Cleaned up on Drop                                         │    │
+│  └─────────────────────────────────────────────────────────────────┘    │
+│                                                                          │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### Cache Entry Structure
+
+```rust
+struct GitStatusEntry {
+    /// HEAD commit hash when cached
+    head_hash: String,
+    /// Whether the file is current (matches Git HEAD)
+    is_current: bool,
+    /// When the cache entry was created
+    cached_at: DateTime<Utc>,
+    /// File content hash (SHA-256) for detecting modifications
+    file_hash: Option<String>,
+    /// Original deprecation reason (only set for Deprecated status)
+    reason: Option<String>,
+}
+```
+
+### Persistent Cache Format
+
+```rust
+struct GitSyncCache {
+    /// Cache version for future migrations
+    version: u32,
+    /// HEAD commit hash when cache was created
+    head_hash: String,
+    /// Cache entries (file_path -> entry)
+    entries: HashMap<String, GitStatusEntry>,
+    /// Maximum number of entries to keep
+    max_entries: usize,
+    /// When cache was last updated
+    updated_at: DateTime<Utc>,
+}
+```
+
+### Cache Invalidation Strategies
+
+| Strategy | Trigger | Behavior |
+|----------|---------|----------|
+| **HEAD Change** | Git commit detected | All entries invalidated (head_hash mismatch) |
+| **File Modified** | Content hash mismatch | Re-check Git status |
+| **TTL Expired** | Entry age > cache_ttl_seconds | Re-check Git status |
+| **Manual** | `clear_cache()` or `invalidate_file()` | Explicit invalidation |
+
+### File Hash Optimization
+
+Files are hashed using SHA-256 to detect content modifications without re-querying Git:
+
+```rust
+fn compute_file_hash(repo: &Repository, file_path: &str) -> Option<String> {
+    // Skip files larger than 10 MB to avoid blocking
+    if metadata.len() > MAX_HASH_SIZE {
+        return None;
+    }
+
+    // Compute SHA-256 hash
+    let mut hasher = Sha256::new();
+    // Read in chunks and update...
+    Some(format!("{:x}", hasher.finalize()))
+}
+```
+
+**Benefits:**
+- Cached `Current` status can be returned if file hash matches
+- Avoids expensive `git status` calls for unchanged files
+- Safe fallback to Git check if hash computation fails
+
+### Background Persistence Flow
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  Background Persistence Task (tokio::spawn)                │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  1. Spawn on GitSync creation (if tokio runtime available) │
+│     ↓                                                       │
+│  2. Run every 5 minutes (tokio::interval)                   │
+│     ↓                                                       │
+│  3. Check dirty flag (AtomicBool)                           │
+│     ├─ If NOT dirty → skip                                 │
+│     └─ If dirty → continue                                 │
+│     ↓                                                       │
+│  4. Serialize cache to JSON                                 │
+│     ↓                                                       │
+│  5. Write to temp file (.rag/git_sync_cache.json.tmp)       │
+│     ↓                                                       │
+│  6. Atomic rename to final location                         │
+│     ↓                                                       │
+│  7. Clear dirty flag                                        │
+│     ↓                                                       │
+│  8. Repeat (go to step 2)                                   │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Error Handling & Graceful Degradation
+
+| Error Scenario | Behavior |
+|----------------|----------|
+| **Cache file not found** | Start with empty cache (normal first run) |
+| **Cache file corrupted** | Log warning, start with empty cache |
+| **Unsupported version** | Log warning, start with empty cache |
+| **Persistence write fails** | Log warning, continue with memory-only mode |
+| **Persistence disabled** | Operate in memory-only mode (no disk I/O) |
+
+### Public API
+
+```rust
+impl GitSync {
+    /// Create with default settings
+    pub fn new(project_path: &Path, cache_ttl_seconds: u64) -> Result<Self>;
+
+    /// Create with custom capacity
+    pub fn with_capacity(project_path: &Path, cache_ttl_seconds: u64, cache_capacity: usize) -> Result<Self>;
+
+    /// Create with full options (including persistence toggle)
+    pub fn with_options(project_path: &Path, cache_ttl_seconds: u64, cache_capacity: usize, enable_persistence: bool) -> Result<Self>;
+
+    /// Check single file sync status
+    pub async fn check_file_sync(&self, file_path: &str) -> Result<GitSyncStatus>;
+
+    /// Batch check multiple files (more efficient)
+    pub async fn batch_check_files(&self, file_paths: &[String]) -> Result<HashMap<String, GitSyncStatus>>;
+
+    /// Check symbol sync status (inherits from file)
+    pub async fn check_symbol_sync(&self, file_path: &str) -> Result<GitSyncStatus>;
+
+    /// Manual cache flush
+    pub async fn flush(&self) -> Result<()>;
+
+    /// Clear all cached entries
+    pub async fn clear_cache(&self);
+
+    /// Invalidate specific file
+    pub async fn invalidate_file(&self, file_path: &str);
+}
+```
+
+### GitSyncStatus Enum
+
+```rust
+pub enum GitSyncStatus {
+    /// Content matches Git HEAD (current)
+    Current,
+    /// Content differs from Git HEAD (deprecated)
+    Deprecated {
+        reason: String,  // Human-readable description
+    },
+    /// Not applicable (non-Git repo or untracked file)
+    NotApplicable,
+}
+```
+
+### Testing Coverage
+
+The implementation includes comprehensive tests:
+- `test_persistent_cache_save` - Verifies cache file creation
+- `test_persistent_cache_load_on_restart` - Simulates program restart
+- `test_cache_invalidation_on_head_change` - HEAD change detection
+- `test_persistence_failure_graceful_degradation` - Persistence disabled
+- `test_persistence_full_workflow` - Complete workflow simulation
+- `test_corrupted_cache_file` - Handles corrupted JSON
+- `test_unsupported_cache_version` - Handles version mismatches
+
+### Configuration Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `cache_ttl_seconds` | 60 | How long cache entries remain valid |
+| `memory_cache_capacity` | 1000 | L1 cache size (LRU) |
+| `persistent_cache_max_entries` | 10000 | L2 cache size |
+| `enable_persistence` | true | Whether to enable disk persistence |
+| `persist_interval` | 300 seconds | Background persistence frequency |
+
+### Integration Points
+
+The GitSync module integrates with:
+- **Confidence Engine**: Uses `GitSyncStatus::is_current()` for confidence scoring
+- **Query Processing**: Filters results based on current/deprecated status
+- **Indexing**: Updates cache when new files are indexed
+- **Daemon Operations**: Persists cache during incremental indexing
