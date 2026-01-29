@@ -1,66 +1,66 @@
-# Claude RAG 完整集成测试方案
+# Claude RAG Complete Integration Test Plan
 
-> 以当前项目 `/home/changh/Projects/claude-rag` 为被测对象，执行端到端的集成测试
-
----
-
-## 测试目标
-
-验证 Claude RAG 的完整功能流程：
-1. ✅ 项目初始化
-2. ✅ API 配置
-3. ✅ 索引创建（文件 + 向量）
-4. ✅ MCP Server 启动
-5. ✅ 查询功能验证
+> Using the current project `/home/changh/Projects/claude-rag` as the test subject, execute end-to-end integration testing
 
 ---
 
-## 前置条件
+## Test Objectives
 
-### 1. API Token 准备
+Verify the complete functional workflow of Claude RAG:
+1. ✅ Project initialization
+2. ✅ API configuration
+3. ✅ Index creation (files + vectors)
+4. ✅ MCP Server startup
+5. ✅ Query functionality verification
 
-需要智谱 AI (Zhipu AI) 的 API 密钥：
-- 获取地址：https://open.bigmodel.cn/
-- 模型：embedding-3 (用于向量嵌入)
+---
 
-### 2. 二进制构建
+## Prerequisites
+
+### 1. API Token Preparation
+
+Requires Zhipu AI API key:
+- Get it at: https://open.bigmodel.cn/
+- Model: embedding-3 (for vector embeddings)
+
+### 2. Binary Build
 
 ```bash
 cd /home/changh/Projects/claude-rag
 cargo build --release
 ```
 
-二进制位置：`/home/changh/Projects/claude-rag/target/release/claude-rag`
+Binary location: `/home/changh/Projects/claude-rag/target/release/claude-rag`
 
 ---
 
-## 测试步骤
+## Test Steps
 
-### 步骤 1: 清理环境
+### Step 1: Clean Environment
 
-**目的**：确保从干净状态开始测试
+**Purpose**: Ensure testing starts from a clean state
 
 ```bash
 cd /home/changh/Projects/claude-rag
 rm -rf .rag
-rm -rf ~/.claude/rag/config.toml  # 可选：清除全局配置
+rm -rf ~/.claude/rag/config.toml  # Optional: clear global config
 ```
 
-**验证点**：
-- `.rag` 目录不存在
-- 无旧配置影响
+**Verification points**:
+- `.rag` directory does not exist
+- No old configuration interference
 
 ---
 
-### 步骤 2: 初始化项目
+### Step 2: Initialize Project
 
-**命令**：
+**Command**:
 ```bash
 cd /home/changh/Projects/claude-rag
 ./target/release/claude-rag init
 ```
 
-**预期输出**：
+**Expected output**:
 ```
 Initializing knowledge base...
 ✓ Knowledge base initialized
@@ -68,13 +68,13 @@ Initializing knowledge base...
   Storage size: 0 bytes
 ```
 
-**验证点**：
-- ✅ `.rag` 目录已创建
-- ✅ `.rag/db` 目录存在
-- ✅ `.rag/config.json` 文件存在
-- ✅ 配置文件包含默认值
+**Verification points**:
+- ✅ `.rag` directory created
+- ✅ `.rag/db` directory exists
+- ✅ `.rag/config.json` file exists
+- ✅ Configuration file contains default values
 
-**验证命令**：
+**Verification commands**:
 ```bash
 ls -la .rag/
 cat .rag/config.json
@@ -82,19 +82,19 @@ cat .rag/config.json
 
 ---
 
-### 步骤 3: 配置 API Token
+### Step 3: Configure API Token
 
-**方式 A: 直接编辑配置文件**
+**Method A: Direct configuration file editing**
 
 ```bash
 nano .rag/config.json
 ```
 
-添加 API token：
+Add API token:
 ```json
 {
   "embedding": {
-    "api_token": "你的智谱AI密钥",
+    "api_token": "your-zhipu-ai-key",
     "api_url": "https://open.bigmodel.cn/api/paas/v4/embeddings",
     "dimensions": 1024,
     "batch_size": 8,
@@ -108,26 +108,26 @@ nano .rag/config.json
 }
 ```
 
-**方式 B: 环境变量**
+**Method B: Environment variable**
 
 ```bash
-export CLAUDE_RAG_API_TOKEN="你的智谱AI密钥"
+export CLAUDE_RAG_API_TOKEN="your-zhipu-ai-key"
 ```
 
-**验证点**：
-- ✅ 配置文件包含有效的 `api_token`
-- ✅ `api_token` 非空
+**Verification points**:
+- ✅ Configuration file contains valid `api_token`
+- ✅ `api_token` is not empty
 
 ---
 
-### 步骤 4: 执行索引
+### Step 4: Execute Indexing
 
-**命令**：
+**Command**:
 ```bash
 ./target/release/claude-rag index --all --force
 ```
 
-**预期输出示例**：
+**Expected output example**:
 ```
 Initializing knowledge base...
 Collecting files...
@@ -139,89 +139,89 @@ Indexing files...
   Errors: 0
 ```
 
-**验证点**：
-- ✅ 索引命令成功执行
+**Verification points**:
+- ✅ Index command executes successfully
 - ✅ `Files indexed > 0`
-- ✅ `Chunks created > 0` (向量索引成功)
-- ✅ `.rag/hnsw.bin` 文件存在且非空
+- ✅ `Chunks created > 0` (vector indexing successful)
+- ✅ `.rag/hnsw.bin` file exists and is not empty
 
-**验证命令**：
+**Verification commands**:
 ```bash
-# 检查 HNSW 索引文件
+# Check HNSW index file
 ls -lh .rag/hnsw.bin
 
-# 查看索引状态
+# View index status
 ./target/release/claude-rag status
 ```
 
 ---
 
-### 步骤 5: 测试查询功能
+### Step 5: Test Query Functionality
 
-**测试 5.1: 基本查询**
+**Test 5.1: Basic query**
 
 ```bash
-./target/release/claude-rag query "HNSW 索引实现"
+./target/release/claude-rag query "HNSW index implementation"
 ```
 
-**预期输出**：
+**Expected output**:
 ```
-# 查询结果: "HNSW 索引实现"
+# Query results: "HNSW index implementation"
 
-## 1. src/storage/hnsw.rs (置信度: 0.95)
-路径: src/storage/hnsw.rs
+## 1. src/storage/hnsw.rs (confidence: 0.95)
+Path: src/storage/hnsw.rs
 ...
 
-[返回相关的代码片段]
+[Return relevant code snippets]
 ```
 
-**验证点**：
-- ✅ 查询返回结果
-- ✅ 结果包含相关文件
-- ✅ 置信度分数合理
+**Verification points**:
+- ✅ Query returns results
+- ✅ Results contain relevant files
+- ✅ Confidence scores are reasonable
 
 ---
 
-**测试 5.2: 类型过滤查询**
+**Test 5.2: Type-filtered query**
 
 ```bash
-# 只查询源代码
-./target/release/claude-rag query "向量嵌入" --type source
+# Query only source code
+./target/release/claude-rag query "vector embedding" --type source
 
-# 只查询文档
-./target/release/claude-rag query "使用说明" --type docs
+# Query only documentation
+./target/release/claude-rag query "usage instructions" --type docs
 ```
 
-**验证点**：
-- ✅ 类型过滤正常工作
+**Verification points**:
+- ✅ Type filtering works correctly
 
 ---
 
-**测试 5.3: 时间范围查询**
+**Test 5.3: Time range query**
 
 ```bash
-# 查询最近 7 天的内容
-./target/release/claude-rag query "新功能" --max-age 7
+# Query content from last 7 days
+./target/release/claude-rag query "new features" --max-age 7
 
-# 查询特定日期之后的内容
-./target/release/claude-rag query "重构" --after "2025-01-20"
+# Query content after specific date
+./target/release/claude-rag query "refactoring" --after "2025-01-20"
 ```
 
-**验证点**：
-- ✅ 时间过滤正常工作
+**Verification points**:
+- ✅ Time filtering works correctly
 
 ---
 
-### 步骤 6: 测试 MCP Server
+### Step 6: Test MCP Server
 
-**测试 6.1: 列出可用工具**
+**Test 6.1: List available tools**
 
 ```bash
 echo '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | \
   ./target/release/claude-rag mcp-server
 ```
 
-**预期响应**：
+**Expected response**:
 ```json
 {
   "jsonrpc": "2.0",
@@ -253,178 +253,178 @@ echo '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | \
 }
 ```
 
-**验证点**：
-- ✅ 返回 5 个工具
-- ✅ 每个工具有名称和描述
+**Verification points**:
+- ✅ Returns 5 tools
+- ✅ Each tool has a name and description
 
 ---
 
-**测试 6.2: 调用查询工具**
+**Test 6.2: Call query tool**
 
 ```bash
 echo '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"rag_query","arguments":{"query":"HNSW索引","top_k":5}}}' | \
   ./target/release/claude-rag mcp-server
 ```
 
-**验证点**：
-- ✅ 返回查询结果
-- ✅ 结果格式正确
+**Verification points**:
+- ✅ Returns query results
+- ✅ Result format is correct
 
 ---
 
-### 步骤 7: 完整功能验证
+### Step 7: Complete Functionality Verification
 
-**测试场景**：查询项目核心功能
+**Test scenario**: Query core project functionality
 
 ```bash
-./target/release/claude-rag query "向量嵌入如何生成" --top-k 10
+./target/release/claude-rag query "how are vector embeddings generated" --top-k 10
 ```
 
-**验证点**：
-- ✅ 返回相关的实现代码
-- ✅ 包含置信度评分
-- ✅ 结果按相关性排序
+**Verification points**:
+- ✅ Returns relevant implementation code
+- ✅ Includes confidence scores
+- ✅ Results sorted by relevance
 
 ---
 
-## 测试检查清单
+## Test Checklist
 
-### 环境准备
-- [ ] 二进制已构建
-- [ ] API token 已获取
-- [ ] 测试环境已清理
+### Environment Preparation
+- [ ] Binary built
+- [ ] API token obtained
+- [ ] Test environment cleaned
 
-### 初始化测试
-- [ ] `.rag` 目录创建成功
-- [ ] 配置文件生成正确
-- [ ] 数据库初始化成功
+### Initialization Test
+- [ ] `.rag` directory created successfully
+- [ ] Configuration file generated correctly
+- [ ] Database initialized successfully
 
-### 配置测试
-- [ ] API token 配置成功
-- [ ] 配置文件格式正确
-- [ ] 配置加载无错误
+### Configuration Test
+- [ ] API token configured successfully
+- [ ] Configuration file format correct
+- [ ] Configuration loads without errors
 
-### 索引测试
-- [ ] 索引命令执行成功
-- [ ] 文件收集正确
-- [ ] 向量嵌入生成成功
-- [ ] HNSW 索引文件创建
-- [ ] 统计信息准确
+### Indexing Test
+- [ ] Index command executes successfully
+- [ ] File collection correct
+- [ ] Vector embedding generation successful
+- [ ] HNSW index file created
+- [ ] Statistics accurate
 
-### 查询测试
-- [ ] 基本查询返回结果
-- [ ] 类型过滤正常
-- [ ] 时间过滤正常
-- [ ] 结果相关性合理
+### Query Test
+- [ ] Basic query returns results
+- [ ] Type filtering works
+- [ ] Time filtering works
+- [ ] Result relevance reasonable
 
-### MCP 测试
-- [ ] MCP Server 启动成功
-- [ ] tools/list 返回正确
-- [ ] 工具调用正常
-- [ ] 错误处理正确
+### MCP Test
+- [ ] MCP Server starts successfully
+- [ ] tools/list returns correctly
+- [ ] Tool calls work normally
+- [ ] Error handling correct
 
 ---
 
-## 预期问题和解决方案
+## Expected Issues and Solutions
 
-### 问题 1: API Token 未配置
+### Issue 1: API Token Not Configured
 
-**错误信息**：
+**Error message**:
 ```
 Embedding API not configured. Please set api_token in config.
 ```
 
-**解决方案**：
-检查 `.rag/config.json` 中的 `api_token` 字段是否非空
+**Solution**:
+Check that the `api_token` field in `.rag/config.json` is not empty
 
 ---
 
-### 问题 2: HNSW 索引文件未创建
+### Issue 2: HNSW Index File Not Created
 
-**可能原因**：
-- API 调用失败
-- 网络问题
-- Token 无效
+**Possible causes**:
+- API call failed
+- Network issues
+- Invalid token
 
-**调试命令**：
+**Debug commands**:
 ```bash
-# 检查索引状态
+# Check index status
 ./target/release/claude-rag status
 
-# 查看日志（如果有）
+# View logs (if any)
 ls -la .rag/logs/
 ```
 
 ---
 
-### 问题 3: 查询返回空结果
+### Issue 3: Query Returns Empty Results
 
-**可能原因**：
-- 索引未完成
-- HNSW 索引为空
-- 查询词不相关
+**Possible causes**:
+- Indexing not completed
+- HNSW index is empty
+- Query term not relevant
 
-**验证命令**：
+**Verification commands**:
 ```bash
-# 检查 HNSW 索引大小
+# Check HNSW index size
 ls -lh .rag/hnsw.bin
 
-# 使用更通用的查询词
-./target/release/claude-rag query "函数"
+# Use more generic query terms
+./target/release/claude-rag query "function"
 ```
 
 ---
 
-## 成功标准
+## Success Criteria
 
-测试通过的标准：
-1. ✅ 所有 6 个步骤成功执行
-2. ✅ HNSW 索引文件大于 0
-3. ✅ 查询返回有意义的结果
-4. ✅ MCP Server 正常响应
-5. ✅ 无严重错误或 panic
+Test passes if:
+1. ✅ All 6 steps execute successfully
+2. ✅ HNSW index file size > 0
+3. ✅ Queries return meaningful results
+4. ✅ MCP Server responds normally
+5. ✅ No critical errors or panics
 
 ---
 
-## 测试报告模板
+## Test Report Template
 
 ```markdown
-# Claude RAG 集成测试报告
+# Claude RAG Integration Test Report
 
-**测试日期**: 2025-01-29
-**测试环境**: /home/changh/Projects/claude-rag
-**版本**: 0.1.0
+**Test date**: 2025-01-29
+**Test environment**: /home/changh/Projects/claude-rag
+**Version**: 0.1.0
 
-## 测试结果
+## Test Results
 
-| 步骤 | 状态 | 说明 |
-|------|------|------|
-| 环境准备 | ✅/❌ | |
-| 初始化 | ✅/❌ | |
-| 配置 | ✅/❌ | |
-| 索引 | ✅/❌ | |
-| 查询 | ✅/❌ | |
+| Step | Status | Notes |
+|------|--------|-------|
+| Environment preparation | ✅/❌ | |
+| Initialization | ✅/❌ | |
+| Configuration | ✅/❌ | |
+| Indexing | ✅/❌ | |
+| Query | ✅/❌ | |
 | MCP | ✅/❌ | |
 
-## 统计数据
+## Statistics
 
-- 索引文件数: ___
-- 创建的块数: ___
-- HNSW 索引大小: ___
-- 查询响应时间: ___
+- Files indexed: ___
+- Chunks created: ___
+- HNSW index size: ___
+- Query response time: ___
 
-## 问题和建议
+## Issues and Suggestions
 
-(记录发现的问题和改进建议)
+(Record discovered issues and improvement suggestions)
 ```
 
 ---
 
-## 关键文件路径
+## Key File Paths
 
-| 文件 | 用途 |
-|------|------|
-| `/home/changh/Projects/claude-rag/.rag/config.json` | 配置文件 |
-| `/home/changh/Projects/claude-rag/.rag/hnsw.bin` | HNSW 索引 |
-| `/home/changh/Projects/claude-rag/.rag/db/` | 数据库目录 |
-| `/home/changh/Projects/claude-rag/target/release/claude-rag` | 二进制文件 |
+| File | Purpose |
+|------|---------|
+| `/home/changh/Projects/claude-rag/.rag/config.json` | Configuration file |
+| `/home/changh/Projects/claude-rag/.rag/hnsw.bin` | HNSW index |
+| `/home/changh/Projects/claude-rag/.rag/db/` | Database directory |
+| `/home/changh/Projects/claude-rag/target/release/claude-rag` | Binary file |

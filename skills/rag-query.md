@@ -1,26 +1,26 @@
 ---
-description: 搜索全部内容（代码+文档+会话历史），综合查询项目知识库
+description: Search all content (code+docs+session history), comprehensive query of project knowledge base
 allowed-tools: Bash(**), Read(**)
-argument-hint: <搜索查询>
+argument-hint: <search query>
 ---
 
-## 用法
+## Usage
 
-`/rag-query <搜索查询>`
+`/rag-query <search query>`
 
-## 目标
+## Objective
 
-使用 Claude RAG 搜索项目的全部知识内容，包括源代码、文档和会话历史。
+Use Claude RAG to search all knowledge content in the project, including source code, documentation, and session history.
 
-## 执行步骤
+## Execution Steps
 
-**步骤 1**：获取当前项目路径。
+**Step 1**: Get the current project path.
 
 ```bash
 echo "${CLAUDE_PROJECT_PATH:-$(pwd)}"
 ```
 
-**步骤 2**：调用 claude-rag 进行综合搜索。
+**Step 2**: Call claude-rag for comprehensive search.
 
 ```bash
 /home/changh/Projects/claude-rag/target/release/claude-rag query "$ARGUMENTS" \
@@ -28,27 +28,27 @@ echo "${CLAUDE_PROJECT_PATH:-$(pwd)}"
     --format markdown
 ```
 
-**步骤 3**：解析并展示搜索结果，按类型分组。
+**Step 3**: Parse and display search results, grouped by type.
 
-## 注意事项
+## Notes
 
-- 综合搜索会返回所有类型的相关内容
-- 结果会按照相似度排序
-- 适合探索性查询，了解项目的整体情况
+- Comprehensive search returns relevant content of all types
+- Results are sorted by similarity
+- Suitable for exploratory queries to understand the overall project situation
 
-## 输出格式
+## Output Format
 
 ```markdown
-## 🔍 综合搜索结果
+## 🔍 Comprehensive Search Results
 
-**查询**: $ARGUMENTS
+**Query**: $ARGUMENTS
 
-### 📄 源代码
-[相关代码结果...]
+### 📄 Source Code
+[relevant code results...]
 
-### 📚 文档
-[相关文档结果...]
+### 📚 Documentation
+[relevant documentation results...]
 
-### 💬 会话历史
-[相关讨论结果...]
+### 💬 Session History
+[relevant discussion results...]
 ```

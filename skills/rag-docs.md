@@ -1,26 +1,26 @@
 ---
-description: 搜索项目文档，包括 README、设计文档、注释等
+description: Search project documentation including README, design docs, comments, etc.
 allowed-tools: Bash(**), Read(**)
-argument-hint: <搜索查询>
+argument-hint: <search query>
 ---
 
-## 用法
+## Usage
 
-`/rag-docs <搜索查询>`
+`/rag-docs <search query>`
 
-## 目标
+## Objective
 
-使用 Claude RAG 搜索项目中的文档内容，包括 README、设计文档、内联注释等。
+Use Claude RAG to search documentation content in the project, including README, design documents, inline comments, etc.
 
-## 执行步骤
+## Execution Steps
 
-**步骤 1**：获取当前项目路径。
+**Step 1**: Get the current project path.
 
 ```bash
 echo "${CLAUDE_PROJECT_PATH:-$(pwd)}"
 ```
 
-**步骤 2**：调用 claude-rag 进行文档搜索。
+**Step 2**: Call claude-rag to search documentation.
 
 ```bash
 /home/changh/Projects/claude-rag/target/release/claude-rag query "$ARGUMENTS" \
@@ -29,26 +29,26 @@ echo "${CLAUDE_PROJECT_PATH:-$(pwd)}"
     --format markdown
 ```
 
-**步骤 3**：解析并展示搜索结果。
+**Step 3**: Parse and display search results.
 
-## 注意事项
+## Notes
 
-- 文档类型包括：README、DESIGN、API 文档、内联注释等
-- 搜索结果会包含文档的出处和上下文
-- 适合查找设计决策、使用说明、架构描述等
+- Documentation types include: README, DESIGN, API docs, inline comments, etc.
+- Search results include the source and context of the documentation
+- Suitable for finding design decisions, usage instructions, architecture descriptions, etc.
 
-## 输出格式
+## Output Format
 
 ```markdown
-## 📚 文档搜索结果
+## 📚 Documentation Search Results
 
-**查询**: $ARGUMENTS
+**Query**: $ARGUMENTS
 
-### 结果 [N]
-- **相似度**: XX%
-- **来源**: `path/to/doc.md`
+### Result [N]
+- **Similarity**: XX%
+- **Source**: `path/to/doc.md`
 
-> 文档内容片段...
+> Documentation content snippet...
 
-**上下文**: 简要说明
+**Context**: brief description
 ```

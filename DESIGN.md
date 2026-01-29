@@ -1099,19 +1099,19 @@ Git commit history is the authoritative source for understanding "why changes ha
 │                     Git Commit History                       │
 ├─────────────────────────────────────────────────────────────┤
 │  Commit 1: "feat: add OAuth2 login"                         │
-│  ├─ Files: src/auth/login.rs (新增)                         │
-│  ├─ Diff: +50 lines (实现 OAuth2)                           │
+│  ├─ Files: src/auth/login.rs (added)                        │
+│  ├─ Diff: +50 lines (implement OAuth2)                      │
 │  └─ Date: 2025-01-25                                        │
 │                                                             │
 │  Commit 2: "fix: resolve token leak issue"                  │
-│  ├─ Files: src/auth/login.rs (修改)                         │
-│  ├─ Diff: -5 +10 lines (修复 token 泄漏)                    │
+│  ├─ Files: src/auth/login.rs (modified)                     │
+│  ├─ Diff: -5 +10 lines (fix token leak)                     │
 │  └─ Date: 2025-01-20                                        │
 │                                                             │
 │  Commit 3: "refactor: migrate from JWT to OAuth2"           │
-│  ├─ Files: src/auth/login.rs (重构)                         │
-│  ├─ Diff: -30 +50 lines (从 JWT 迁移到 OAuth2)              │
-│  ├─ Message: "JWT 存在安全风险，改用 OAuth2..."             │
+│  ├─ Files: src/auth/login.rs (refactored)                   │
+│  ├─ Diff: -30 +50 lines (migrate from JWT to OAuth2)        │
+│  ├─ Message: "JWT has security risks, switching to OAuth2..."│
 │  └─ Date: 2025-01-15                                        │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -1212,48 +1212,48 @@ impl Indexer {
 ### Query Output Example
 
 ```markdown
-# 登录认证功能
+# Authentication and Login Feature
 
-## 📌 当前状态
+## 📌 Current Status
 
-**当前实现**: 代码库中的最新版本
+**Current Implementation**: Latest version in the codebase
 
 - `src/auth/login.rs`
 - `src/auth/oauth2.rs`
 
-最新 commit: `a1b2c3d4`
+Latest commit: `a1b2c3d4`
 
 ---
 
-## 📜 变更时间线
+## 📜 Change Timeline
 
-### 🟢 2025-01-25 (2小时前)
+### 🟢 2025-01-25 (2 hours ago)
 
-**[Git 变更]** 修改 src/auth/login.rs: fix: resolve token leak issue
+**[Git Change]** Modified src/auth/login.rs: fix: resolve token leak issue
 
-修复了 OAuth2 token 泄漏问题，在用户登出时正确清理 token。
-
----
-
-### 🔵 2025-01-20 (5天前)
-
-**[Git 变更]** 修改 src/auth/login.rs: feat: add OAuth2 login
-
-实现 OAuth2 认证流程，支持 GitHub 和 Google 登录。
+Fixed OAuth2 token leak issue by properly cleaning up tokens on user logout.
 
 ---
 
-### 🟡 2025-01-15 (10天前)
+### 🔵 2025-01-20 (5 days ago)
 
-**[讨论]** 讨论是否迁移到 OAuth2
+**[Git Change]** Modified src/auth/login.rs: feat: add OAuth2 login
 
-> User: JWT token 存在什么安全问题？
+Implemented OAuth2 authentication flow, supporting GitHub and Google login.
+
+---
+
+### 🟡 2025-01-15 (10 days ago)
+
+**[Discussion]** Discussion on migrating to OAuth2
+
+> User: What security issues exist with JWT tokens?
 >
-> AI: JWT token 如果不正确处理，可能导致...
+> AI: If JWT tokens are not handled properly, they can lead to...
 >
-> User: 那我们应该用什么方案？
+> User: What solution should we use then?
 >
-> AI: 建议使用 OAuth2，因为...
+> AI: I recommend using OAuth2 because...
 ```
 
 ### Implementation Phases

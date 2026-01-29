@@ -1,26 +1,26 @@
 ---
-description: 按时间线展示功能的演进历史，包括 Git 提交和会话讨论
+description: Display feature evolution history over time, including Git commits and session discussions
 allowed-tools: Bash(**), Read(**)
-argument-hint: <功能或主题>
+argument-hint: <feature or topic>
 ---
 
-## 用法
+## Usage
 
-`/rag-timeline <功能或主题>`
+`/rag-timeline <feature or topic>`
 
-## 目标
+## Objective
 
-使用 Claude RAG 的时间线查询功能，展示某个功能或主题的演进历史，包括代码变更和讨论历史。
+Use Claude RAG's timeline query feature to display the evolution history of a feature or topic, including code changes and discussion history.
 
-## 执行步骤
+## Execution Steps
 
-**步骤 1**：获取当前项目路径。
+**Step 1**: Get the current project path.
 
 ```bash
 echo "${CLAUDE_PROJECT_PATH:-$(pwd)}"
 ```
 
-**步骤 2**：调用 claude-rag 进行时间线查询。
+**Step 2**: Call claude-rag for timeline query.
 
 ```bash
 /home/changh/Projects/claude-rag/target/release/claude-rag query "$ARGUMENTS" \
@@ -28,29 +28,29 @@ echo "${CLAUDE_PROJECT_PATH:-$(pwd)}"
     --format markdown
 ```
 
-**步骤 3**：解析并按时间顺序展示结果。
+**Step 3**: Parse and display results in chronological order.
 
-## 注意事项
+## Notes
 
-- 时间线查询会显示功能的完整演进过程
-- 包含 Git 提交信息和会话讨论
-- 按时间倒序排列，最新的在前
-- 带有置信度颜色标记（绿色=当前代码，蓝色=Git提交，黄色=近期会话，红色=旧讨论）
+- Timeline query shows the complete evolution process of a feature
+- Includes Git commit information and session discussions
+- Sorted in reverse chronological order, newest first
+- Includes confidence color indicators (green=current code, blue=Git commit, yellow=recent session, red=old discussion)
 
-## 输出格式
+## Output Format
 
 ```markdown
-## 📜 时间线: $ARGUMENTS
+## 📜 Timeline: $ARGUMENTS
 
-### 📌 当前状态
-[当前代码实现状态...]
+### 📌 Current Status
+[current code implementation status...]
 
-### 📜 变更时间线
+### 📜 Change Timeline
 
-#### 🟢 YYYY-MM-DD (时间描述)
-**[Git 变更/讨论]** 描述
+#### 🟢 YYYY-MM-DD (time description)
+**[Git Change/Discussion]** description
 
-变更/讨论内容...
+change/discussion content...
 
 ---
 
