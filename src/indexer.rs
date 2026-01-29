@@ -6,16 +6,18 @@
 //! - HNSW vector index storage
 //! - Caching and error handling
 
+use crate::code_chunker::CodeChunker;
 use crate::config::Config;
 use crate::embedding::EmbeddingClient;
 use crate::error::Result;
-use crate::models::ContentType;
+use crate::models::{ContentType, Symbol};
 use crate::storage::hnsw::HnswIndex;
 use crate::vector::VectorBuilder;
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::warn;
+use tracing::{info, warn};
 
 /// Default batch size for embedding generation.
 const DEFAULT_BATCH_SIZE: usize = 8;
@@ -262,6 +264,190 @@ impl Indexer {
         }
 
         Ok(stats)
+    }
+
+    /// Index multiple items in batch.
+
+    // ==================== Code Symbol Indexing ====================
+
+    /// Index code symbols with embedding generation.
+    ///
+    /// # Arguments
+    /// * `symbols` - Symbols to index
+    /// * `branch` - Git branch name
+    /// * `index` - HNSW index to insert into
+    ///
+    /// # Returns
+    /// * `IndexingStats` - Statistics
+    pub async fn index_symbols(
+        &self,
+        symbols: &[Symbol],
+        branch: &str,
+        index: &mut HnswIndex,
+    ) -> Result<IndexingStats> {
+        let mut stats = IndexingStats::default();
+
+        if symbols.is_empty() {
+            return Ok(stats);
+        }
+
+        let chunker = CodeChunker::new();
+
+        // Chunk all symbols
+        let mut all_chunks = Vec::new();
+        for symbol in symbols {
+            match chunker.chunk_symbol(symbol) {
+                Ok(chunks) => {
+                    for chunk in chunks {
+                        all_chunks.push((symbol.id.clone(), chunk));
+                    }
+                    stats.processed += 1;
+                }
+                Err(e) => {
+                    warn!(
+                        symbol_id = %symbol.id,
+                        error = %e,
+                        "Error chunking symbol"
+                    );
+                    stats.errors += 1;
+                }
+            }
+        }
+
+        // Generate embeddings and insert into index
+        for (_symbol_id, chunk) in all_chunks {
+            let content = chunk.content();
+            let chunk_id = chunk.id();
+
+            match self.generate_cached(&content, Some(&chunk_id)).await {
+                Ok(embedding) => {
+                    let mut normalized = embedding;
+                    self.builder.normalize(&mut normalized);
+
+                    // Use branch-aware ID
+                    let branch_aware_id = format!("{}:{}", branch, chunk_id);
+
+                    if let Err(e) = index.insert(branch_aware_id, ContentType::Symbol, normalized) {
+                        warn!(
+                            chunk_id = %chunk_id,
+                            error = %e,
+                            "Error inserting symbol chunk into index"
+                        );
+                        stats.errors += 1;
+                    } else {
+                        stats.embeddings_generated += 1;
+                    }
+                }
+                Err(e) => {
+                    warn!(
+                        chunk_id = %chunk_id,
+                        error = %e,
+                        "Error generating embedding for symbol chunk"
+                    );
+                    stats.errors += 1;
+                }
+            }
+        }
+
+        info!(
+            branch = %branch,
+            symbols = stats.processed,
+            embeddings = stats.embeddings_generated,
+            errors = stats.errors,
+            "Indexed symbols"
+        );
+
+        Ok(stats)
+    }
+
+    /// Index a single code file with symbol extraction.
+    ///
+    /// # Arguments
+    /// * `file_path` - Path to the code file
+    /// * `file_id` - Unique file identifier
+    /// * `branch` - Git branch name
+    /// * `index` - HNSW index to insert into
+    ///
+    /// # Returns
+    /// * `(IndexingStats, Vec<Symbol>)` - Statistics and extracted symbols
+    pub async fn index_code_file(
+        &self,
+        file_path: &Path,
+        file_id: &str,
+        branch: &str,
+        index: &mut HnswIndex,
+    ) -> Result<(IndexingStats, Vec<Symbol>)> {
+        use crate::ast::AstParser;
+        use tokio::fs;
+
+        // Read file content
+        let content = fs::read_to_string(file_path).await?;
+
+        // Create parser and extract symbols
+        let mut parser = AstParser::from_path(file_path)?;
+
+        let mut symbols = parser.extract_symbols(&content, file_path, file_id)?;
+
+        // Update symbols with branch and commit info
+        for symbol in &mut symbols {
+            symbol.branch_name = branch.to_string();
+            // Note: last_commit_hash would be set by caller using git info
+        }
+
+        // Index the symbols
+        let stats = self.index_symbols(&symbols, branch, index).await?;
+
+        Ok((stats, symbols))
+    }
+
+    /// Index code symbols in batch for better performance.
+    ///
+    /// # Arguments
+    /// * `files` - List of (file_path, file_id) tuples
+    /// * `branch` - Git branch name
+    /// * `index` - HNSW index to insert into
+    ///
+    /// # Returns
+    /// * `(IndexingStats, Vec<Symbol>)` - Aggregated statistics and all extracted symbols
+    pub async fn index_code_files(
+        &self,
+        files: Vec<(&Path, &str)>,
+        branch: &str,
+        index: &mut HnswIndex,
+    ) -> Result<(IndexingStats, Vec<Symbol>)> {
+        let files_count = files.len();
+        let mut total_stats = IndexingStats::default();
+        let mut all_symbols = Vec::new();
+
+        for (file_path, file_id) in files {
+            match self.index_code_file(file_path, file_id, branch, index).await {
+                Ok((stats, mut symbols)) => {
+                    total_stats.processed += stats.processed;
+                    total_stats.embeddings_generated += stats.embeddings_generated;
+                    total_stats.errors += stats.errors;
+                    all_symbols.append(&mut symbols);
+                }
+                Err(e) => {
+                    warn!(
+                        file_path = %file_path.display(),
+                        error = %e,
+                        "Error indexing code file"
+                    );
+                    total_stats.errors += 1;
+                }
+            }
+        }
+
+        info!(
+            branch = %branch,
+            files = files_count,
+            total_symbols = all_symbols.len(),
+            embeddings = total_stats.embeddings_generated,
+            errors = total_stats.errors,
+            "Indexed code files"
+        );
+
+        Ok((total_stats, all_symbols))
     }
 
     /// Index multiple items in batch.

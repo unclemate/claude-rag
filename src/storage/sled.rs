@@ -296,6 +296,107 @@ impl StorageManager {
         self.get_id_list(&key)
     }
 
+    // ==================== Branch-Aware Symbol Operations ====================
+
+    /// Store a symbol with branch awareness.
+    ///
+    /// The symbol ID will be prefixed with the branch name to ensure isolation.
+    pub fn store_symbol_branch(&self, symbol: &Symbol, branch: &str) -> Result<()> {
+        let branch_aware_id = format!("{}:{}", branch, symbol.id);
+        let key = format!("symbol:{}", branch_aware_id);
+        let value = serde_json::to_vec(symbol)?;
+        self.db.insert(key, value)?;
+
+        // Update branch_symbols index
+        self.add_to_branch_symbols(branch, &symbol.id)?;
+
+        // Also update file_symbols index (with original ID)
+        self.add_to_file_symbols(&symbol.file_id, &symbol.id)?;
+
+        Ok(())
+    }
+
+    /// Retrieve a symbol with branch awareness.
+    pub fn get_symbol_branch(&self, id: &str, branch: &str) -> Result<Option<Symbol>> {
+        let branch_aware_id = format!("{}:{}", branch, id);
+        let key = format!("symbol:{}", branch_aware_id);
+        if let Some(value) = self.db.get(key)? {
+            let symbol = serde_json::from_slice(&value)?;
+            Ok(Some(symbol))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Get all symbols for a specific branch.
+    pub fn get_branch_symbols(&self, branch: &str) -> Result<Vec<Symbol>> {
+        let mut symbols = Vec::new();
+        let prefix = format!("branch_symbols:{}", branch);
+
+        // First get all symbol IDs for this branch
+        let symbol_ids = self.get_id_list(&prefix)?;
+
+        // Then retrieve each symbol
+        for symbol_id in symbol_ids {
+            let branch_aware_id = format!("{}:{}", branch, symbol_id);
+            let key = format!("symbol:{}", branch_aware_id);
+            if let Some(value) = self.db.get(key)? {
+                if let Ok(symbol) = serde_json::from_slice::<Symbol>(&value) {
+                    symbols.push(symbol);
+                }
+            }
+        }
+
+        Ok(symbols)
+    }
+
+    /// Add symbol ID to branch_symbols index.
+    fn add_to_branch_symbols(&self, branch: &str, symbol_id: &str) -> Result<()> {
+        let key = format!("branch_symbols:{}", branch);
+        let mut ids = self.get_id_list(&key)?;
+        if !ids.contains(&symbol_id.to_string()) {
+            ids.push(symbol_id.to_string());
+            self.set_id_list(&key, &ids)?;
+        }
+        Ok(())
+    }
+
+    /// Clear all symbols for a specific branch.
+    ///
+    /// This is useful when switching branches or rebuilding the index.
+    pub fn clear_branch_symbols(&self, branch: &str) -> Result<()> {
+        let prefix = format!("branch_symbols:{}", branch);
+        let symbol_ids = self.get_id_list(&prefix)?;
+
+        // Remove each symbol
+        for symbol_id in symbol_ids {
+            let branch_aware_id = format!("{}:{}", branch, symbol_id);
+            let key = format!("symbol:{}", branch_aware_id);
+            self.db.remove(key)?;
+        }
+
+        // Clear the index
+        self.db.remove(prefix)?;
+
+        Ok(())
+    }
+
+    /// Get all branches that have indexed symbols.
+    pub fn get_indexed_branches(&self) -> Result<Vec<String>> {
+        let mut branches = Vec::new();
+        let prefix = "branch_symbols:";
+
+        for item in self.db.scan_prefix(prefix) {
+            let (key, _value) = item.map_err(RagError::Sled)?;
+            let key_str = String::from_utf8_lossy(&key);
+            if let Some(branch) = key_str.strip_prefix(prefix) {
+                branches.push(branch.to_string());
+            }
+        }
+
+        Ok(branches)
+    }
+
     /// Add commit ID to file_commits index.
     fn add_to_file_commits(&self, project_path: &str, file_path: &str, commit_id: &str) -> Result<()> {
         let key = format!("file_commits:{}:{}", project_path, file_path);
@@ -507,6 +608,8 @@ mod tests {
             doc_comment: None,
             code: "fn test_func() {}".to_string(),
             parent_id: None,
+            branch_name: String::new(),
+            last_commit_hash: None,
         };
 
         storage.store_symbol(&symbol).unwrap();

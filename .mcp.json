@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "claude-rag": {
+      "command": "/home/changh/Projects/claude-rag/target/release/claude-rag",
+      "args": ["mcp-server"],
+      "env": {
+        "CLAUDE_PROJECT_PATH": "/home/changh/Projects/claude-rag"
+      }
+    }
+  }
+}

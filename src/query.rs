@@ -699,12 +699,29 @@ impl QueryExecutor {
             ));
         }
 
-        // P1: Try symbol (code-level indexing)
-        if let Ok(Some(symbol)) = self.storage.get_symbol(id) {
-            let content = if let Some(ref doc) = symbol.doc_comment {
-                format!("{} - {}", symbol.name, doc)
+        // P1: Try symbol (code-level indexing) with branch-aware fallback
+        // First, try to extract branch from ID (format: "branch:symbol:xxx" or "branch:chunk-xxx")
+        let symbol_result = if id.contains(':') {
+            // Parse branch-aware ID: "branch:symbol_id" -> ("branch", "symbol_id")
+            let parts: Vec<&str> = id.splitn(2, ':').collect();
+            if parts.len() == 2 {
+                let branch = parts[0];
+                let symbol_id = parts[1];
+                self.storage.get_symbol_branch(symbol_id, branch)
             } else {
-                format!("{}: {}", symbol.kind, symbol.name)
+                self.storage.get_symbol(id)
+            }
+        } else {
+            self.storage.get_symbol(id)
+        };
+
+        if let Ok(Some(symbol)) = symbol_result {
+            let content = if let Some(ref doc) = symbol.doc_comment {
+                // Take first line of doc comment for brevity
+                let doc_summary = doc.lines().next().unwrap_or("");
+                format!("{} - {}", symbol.name, doc_summary)
+            } else {
+                format!("{}: {:?}", symbol.kind, symbol.name)
             };
 
             return Ok(EnhancedItem::new(
@@ -2544,6 +2561,8 @@ mod tests {
             doc_comment: Some("Test function documentation".to_string()),
             code: "fn test_function() { }".to_string(),
             parent_id: None,
+            branch_name: String::new(),
+            last_commit_hash: None,
         };
         executor.storage.store_symbol(&symbol).expect("should store symbol");
 
@@ -3054,6 +3073,8 @@ mod tests {
             doc_comment: None,
             code: "fn test_func() {}".to_string(),
             parent_id: None,
+            branch_name: String::new(),
+            last_commit_hash: None,
         };
         executor.storage.store_symbol(&symbol).unwrap();
 

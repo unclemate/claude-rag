@@ -11,6 +11,7 @@ Claude RAG is a Rust tool that builds a **complete time-aware RAG knowledge base
 
 - **Session Records**: Claude Code interaction history (user input + AI output)
 - **Source Files**: Project code with hierarchical indexing (file-level + function/class-level)
+- **Code Symbols**: Function/class/method-level indexing with branch awareness ⭐
 - **Documentation**: README, design docs, comments, etc.
 - **Other Files**: Configs, test cases, etc.
 - **Git History**: Commit history and diffs with temporal context ⭐
@@ -22,6 +23,10 @@ Claude RAG is a Rust tool that builds a **complete time-aware RAG knowledge base
 **📜 Change Timeline**: Track feature evolution through Git commits and session history
 
 **🎯 Smart Context**: Automatically identifies what's current vs. deprecated
+
+**⭐ Symbol-Level Search**: Find specific functions, classes, and methods with semantic understanding
+
+**🔀 Branch-Aware Indexing**: Separate symbol indices for different Git branches
 
 Data is stored locally in each project's `.rag/` directory, ensuring privacy and enabling semantic retrieval of project context.
 
@@ -72,7 +77,8 @@ Data is stored locally in each project's `.rag/` directory, ensuring privacy and
 | Source | Parse Method | Index Granularity |
 |--------|-------------|-------------------|
 | **Session JSONL** | Parser Module | Per message |
-| **Source Files** | FileScanner + AST | File-level + function/class-level |
+| **Source Files** | FileScanner + AST | File-level + paragraph-level |
+| **Code Symbols** ⭐ | CodeChunker + AST | Symbol/Block/File-level (3-tier chunking) |
 | **Doc Files** | FileScanner | File-level + paragraph-level |
 | **Other Files** | FileScanner | File-level |
 | **Git History** | GitCollector (git2) | Per commit + per file diff (optional, requires Git repo) |
@@ -161,6 +167,9 @@ Enter directly in Claude Code conversation:
 # Search source only
 /rag-code How to validate user permissions?
 
+# ⭐ Search code symbols (function/class level)
+/rag-code How is the authentication token validated?
+
 # Search docs only
 /rag-docs What is the deployment process?
 
@@ -202,6 +211,11 @@ claude-rag query "database" --max-age 7          # Last 7 days
 claude-rag query "auth" --after "2025-01-01"     # Since a date
 claude-rag query "bug" --after "1w" --before "7d" # Time range
 
+# ⭐ Code symbol indexing
+claude-rag index-code --branch main            # Index current branch symbols
+claude-rag index-code --all                     # Index all branches
+claude-rag index-code --project /path/to/project --branch feature/api
+
 # Output example:
 # 🎯 Found 3 relevant contexts
 #
@@ -216,6 +230,68 @@ claude-rag query "bug" --after "1w" --before "7d" # Time range
 # Session: Backend Config Cleanup (2025-01-23)
 # ──────────────────────────────────────────────────────
 # We discussed login config cleanup before...
+```
+
+## ⭐ Code Symbol Indexing
+
+### Overview
+
+Claude RAG now supports **symbol-level code indexing** with branch awareness:
+
+- **3-tier chunking**: Symbol → Block → File levels
+- **Branch isolation**: Separate indices per Git branch
+- **Semantic search**: Find functions by meaning, not just keywords
+
+### Indexing Granularity
+
+| Level | Threshold | Description |
+|-------|-----------|-------------|
+| **Symbol** | < 500 lines | Individual functions, classes, methods |
+| **Block** | > 500 lines | Large symbols split into 300-line chunks with 10-line overlap |
+| **File** | Summary level | File overview when symbol extraction fails |
+
+### Branch-Aware Storage
+
+Symbols are stored with branch context:
+
+```
+{projectPath}/.rag/db/
+├── symbol:main:symbol:abc123    # Symbol on main branch
+├── symbol:feature/api:symbol:abc123  # Same symbol on feature branch
+└── ...
+```
+
+### Usage Examples
+
+**Index code symbols:**
+```bash
+# Index current branch
+claude-rag index-code
+
+# Index specific branch
+claude-rag index-code --branch feature/api
+
+# Index all branches
+claude-rag index-code --all
+```
+
+**Search with granularity (MCP):**
+```json
+{
+  "name": "rag_search_code",
+  "arguments": {
+    "query": "用户认证逻辑",
+    "granularity": "symbol",  // or "file" or "mixed"
+    "top_k": 10
+  }
+}
+```
+
+**Search results:**
+```
+1. handle_auth - 认证处理函数 (similarity: 0.92)
+2. verify_token - Token验证 (similarity: 0.88)
+3. TokenManager - Token管理器 (similarity: 0.85)
 ```
 
 ## How It Works

@@ -48,6 +48,21 @@ enum Commands {
         #[arg(long)]
         r#type: Option<String>,
     },
+    /// Index code symbols for semantic search
+    IndexCode {
+        /// Index all projects
+        #[arg(long)]
+        all: bool,
+        /// Index specific project
+        #[arg(long)]
+        project: Option<String>,
+        /// Git branch to index (default: current branch)
+        #[arg(long)]
+        branch: Option<String>,
+        /// Force re-index
+        #[arg(long)]
+        force: bool,
+    },
     /// Daemon commands
     Daemon {
         #[command(subcommand)]
@@ -127,6 +142,9 @@ async fn main() -> Result<()> {
         Commands::Index { all, project, force, r#type } => {
             handle_index(all, project, force, r#type)?;
         }
+        Commands::IndexCode { all, project, branch, force } => {
+            handle_index_code(all, project, branch, force)?;
+        }
         Commands::Daemon { daemon_cmd } => {
             handle_daemon(daemon_cmd).await?;
         }
@@ -194,6 +212,182 @@ fn handle_init(force: bool) -> Result<()> {
             println!("✗ Failed to initialize: {}", e);
             std::process::exit(1);
         }
+    }
+
+    Ok(())
+}
+
+/// Handle code symbol indexing command
+///
+/// This function indexes code symbols for semantic search.
+fn handle_index_code(_all: bool, _project: Option<String>, branch: Option<String>, _force: bool) -> Result<()> {
+    let current_dir = std::env::current_dir()
+        .map_err(|e| anyhow::anyhow!("Failed to get current directory: {}", e))?;
+
+    // Determine branch to use
+    let branch_name = match branch {
+        Some(b) => b,
+        None => {
+            // Get current git branch
+            use claude_rag::branch::BranchManager;
+            match BranchManager::new(&current_dir) {
+                Ok(manager) => manager.current_branch()?,
+                Err(_) => "main".to_string(),
+            }
+        }
+    };
+
+    info!("Starting code symbol indexing for branch: {}", branch_name);
+    println!("🔍 Indexing code symbols...");
+    println!("  Branch: {}", branch_name);
+    println!("  Project: {}", current_dir.display());
+
+    // Load config
+    let config = match claude_rag::ConfigManager::load(Some(&current_dir)) {
+        Ok(config) => config,
+        Err(e) => {
+            warn!("Failed to load config, using defaults: {}", e);
+            eprintln!("Warning: Failed to load config, using defaults");
+            claude_rag::Config::default()
+        }
+    };
+
+    // Open storage
+    let storage = claude_rag::storage::sled::StorageManager::open_project_db(&current_dir)?;
+
+    // Load or create HNSW index
+    let mut hnsw_index = match storage.load_hnsw()? {
+        Some(index) => index,
+        None => claude_rag::storage::hnsw::HnswIndex::new(
+            config.hnsw.m,
+            config.hnsw.ef_construction,
+            config.hnsw.ef_search,
+        ),
+    };
+
+    // Create indexer
+    let indexer = claude_rag::indexer::Indexer::from_config(&config)?;
+    let api_configured = indexer.is_configured();
+
+    if !api_configured {
+        warn!("Embedding API not configured, cannot index code symbols");
+        eprintln!("✗ Embedding API not configured");
+        eprintln!("  Please configure embedding.api_token in .rag/config.json");
+        eprintln!("  Or run in test mode: CLAUDE_RAG_TEST_MODE=1");
+        std::process::exit(1);
+    }
+
+    // Step 1: Find all code files in the project
+    use claude_rag::scanner::FileScanner;
+    let scanner = FileScanner::new(&current_dir)?;
+
+    println!("  Scanning for code files...");
+    let scanned_files = scanner.scan(true, false, false)?;
+
+    // Filter only source files
+    let code_files: Vec<_> = scanned_files
+        .into_iter()
+        .filter(|f| f.file_type == claude_rag::scanner::FileType::Source)
+        .collect();
+
+    println!("  Found {} code files", code_files.len());
+
+    if code_files.is_empty() {
+        println!("✓ No code files to index");
+        return Ok(());
+    }
+
+    // Create progress reporter with configured style
+    let reporter = claude_rag::ProgressBarReporter::new(config.progress.style.clone());
+
+    // Step 2 & 3: Extract symbols and index them with branch awareness
+    use sha2::{Digest, Sha256};
+    use tokio::runtime::Runtime;
+
+    // Check if we're already in a runtime context
+    if let Ok(handle) = tokio::runtime::Handle::try_current() {
+        // We're already in an async context, use block_in_place with block_on
+        let files_to_index: Vec<(std::path::PathBuf, String)> = code_files
+            .iter()
+            .map(|f| {
+                let relative_path = f.path
+                    .strip_prefix(&current_dir)
+                    .unwrap_or(&f.path)
+                    .to_string_lossy()
+                    .to_string();
+                let file_id = format!("file:{:x}", Sha256::digest(relative_path.as_bytes()));
+                (f.path.clone(), file_id)
+            })
+            .collect();
+
+        println!("  Extracting and indexing symbols...");
+
+        let (stats, symbols) = tokio::task::block_in_place(|| {
+            handle.block_on(async {
+                indexer.index_code_files(
+                    files_to_index.iter().map(|(p, id)| (p.as_path(), id.as_str())).collect(),
+                    &branch_name,
+                    &mut hnsw_index,
+                ).await
+            })
+        })?;
+
+        return finish_indexing(stats, symbols, &storage, &hnsw_index, reporter);
+    }
+
+    // No runtime context, create new one
+    let rt = Runtime::new()?;
+
+    let files_to_index: Vec<(std::path::PathBuf, String)> = code_files
+        .iter()
+        .map(|f| {
+            let relative_path = f.path
+                .strip_prefix(&current_dir)
+                .unwrap_or(&f.path)
+                .to_string_lossy()
+                .to_string();
+            let file_id = format!("file:{:x}", Sha256::digest(relative_path.as_bytes()));
+            (f.path.clone(), file_id)
+        })
+        .collect();
+
+    println!("  Extracting and indexing symbols...");
+    let (stats, symbols) = rt.block_on(async {
+        indexer.index_code_files(
+            files_to_index.iter().map(|(p, id)| (p.as_path(), id.as_str())).collect(),
+            &branch_name,
+            &mut hnsw_index,
+        ).await
+    })?;
+
+    finish_indexing(stats, symbols, &storage, &hnsw_index, reporter)
+}
+
+fn finish_indexing(
+    stats: claude_rag::indexer::IndexingStats,
+    symbols: Vec<claude_rag::models::Symbol>,
+    storage: &claude_rag::storage::sled::StorageManager,
+    hnsw_index: &claude_rag::storage::hnsw::HnswIndex,
+    reporter: claude_rag::ProgressBarReporter,
+) -> Result<()> {
+    // Store symbols in StorageManager
+    println!("  Storing {} symbols...", symbols.len());
+    for symbol in &symbols {
+        storage.store_symbol_branch(symbol, "main")?;
+    }
+
+    reporter.finish();
+
+    // Save HNSW index
+    storage.save_hnsw(hnsw_index)?;
+
+    // Print results
+    println!("✓ Code symbol indexing complete");
+    println!("  Symbols indexed: {}", symbols.len());
+    println!("  Embeddings generated: {}", stats.embeddings_generated);
+
+    if stats.errors > 0 {
+        println!("  Errors: {}", stats.errors);
     }
 
     Ok(())
@@ -565,13 +759,13 @@ fn handle_install_skills() -> Result<()> {
             anyhow::anyhow!("Failed to install skills: {}", e)
         })?;
 
-    info!("Skills installed to {}", installer.skills_dir().display());
-    println!("✓ Skills installed to: {}", installer.skills_dir().display());
+    info!("Skills installed to {}", installer.commands_dir().display());
+    println!("✓ Skills installed to: {}", installer.commands_dir().display());
     println!("  Available skills:");
-    println!("    /rag-query     - Query all indexed content");
-    println!("    /rag-code      - Search source code");
-    println!("    /rag-docs      - Search documentation");
-    println!("    /rag-session   - Search previous sessions");
-    println!("    /rag-timeline  - Build feature timeline");
+    println!("    /rag:code      - Search source code");
+    println!("    /rag:docs      - Search documentation");
+    println!("    /rag:query     - Query all indexed content");
+    println!("    /rag:session   - Search previous sessions");
+    println!("    /rag:timeline  - Build feature timeline");
     Ok(())
 }

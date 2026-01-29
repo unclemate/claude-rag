@@ -12,7 +12,9 @@
 #![warn(clippy::all)]
 
 pub mod ast;
+pub mod branch;
 pub mod cli;
+pub mod code_chunker;
 pub mod collector;
 pub mod config;
 pub mod daemon;
@@ -26,15 +28,16 @@ pub mod logging;
 pub mod mcp;
 pub mod results;
 pub mod parser;
+pub mod query;
 pub mod retrieval;
 pub mod scanner;
 pub mod skills;
 pub mod storage;
+pub mod symbol_cache;
 pub mod vector;
 
 pub mod models;
 pub mod progress;
-pub mod query;
 
 pub use ast::{AstParser, SupportedLanguage};
 pub use config::{Config, ConfigManager, EmbeddingConfig};

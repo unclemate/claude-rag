@@ -294,6 +294,188 @@ impl VectorBuilder {
 
         summary
     }
+
+    /// Format a code chunk for vectorization.
+    ///
+    /// Adds contextual information to code chunks to improve semantic search:
+    /// - Symbol type and name
+    /// - File path and language
+    /// - Branch information
+    /// - Line number range
+    ///
+    /// # Arguments
+    /// * `code` - The code content
+    /// * `symbol_name` - Name of the symbol (function, class, etc.)
+    /// * `symbol_kind` - Type of symbol (function, class, etc.)
+    /// * `file_path` - Path to the source file
+    /// * `start_line` - Start line number
+    /// * `end_line` - End line number
+    /// * `branch` - Git branch name
+    /// * `doc_comment` - Optional documentation comment
+    ///
+    /// # Returns
+    /// Formatted string ready for embedding generation
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let formatted = builder.format_code_chunk(
+    ///     "fn hello() { println!(\"Hello\"); }",
+    ///     "hello",
+    ///     "Function",
+    ///     "src/main.rs",
+    ///     10,
+    ///     12,
+    ///     "main",
+    ///     Some("Prints hello message")
+    /// );
+    /// // Returns:
+    /// // "Function: hello
+    /// //  File: src/main.rs (lines 10-12)
+    /// //  Branch: main
+    /// //
+    /// //  Doc: Prints hello message
+    /// //
+    /// //  Code:
+    /// //  fn hello() { println!(\"Hello\"); }"
+    /// ```
+    pub fn format_code_chunk(
+        &self,
+        code: &str,
+        symbol_name: &str,
+        symbol_kind: &str,
+        file_path: &str,
+        start_line: usize,
+        end_line: usize,
+        branch: &str,
+        doc_comment: Option<&str>,
+    ) -> String {
+        let mut formatted = String::new();
+
+        // Header with symbol information
+        formatted.push_str(&format!("{}: {}\n", symbol_kind, symbol_name));
+        formatted.push_str(&format!(" File: {} (lines {}-{})\n", file_path, start_line, end_line));
+        formatted.push_str(&format!(" Branch: {}\n", branch));
+
+        // Documentation comment if available
+        if let Some(doc) = doc_comment {
+            if !doc.trim().is_empty() {
+                formatted.push_str("\n Doc: ");
+                formatted.push_str(doc.trim());
+                formatted.push('\n');
+            }
+        }
+
+        // Code content
+        formatted.push_str("\n Code:\n");
+        for line in code.lines() {
+            formatted.push_str(" ");
+            formatted.push_str(line);
+            formatted.push('\n');
+        }
+
+        formatted
+    }
+
+    /// Extract contextual keywords from code for enhanced search.
+    ///
+    /// This method analyzes code to extract:
+    /// - Function/method names called
+    /// - Types used
+    /// - Variable names
+    /// - Keywords specific to the language
+    ///
+    /// # Arguments
+    /// * `code` - The code content
+    /// * `language` - Programming language
+    ///
+    /// # Returns
+    /// Vector of contextual keywords
+    pub fn extract_code_context(&self, code: &str, language: &str) -> Vec<String> {
+        let mut keywords = Vec::new();
+
+        match language.to_lowercase().as_str() {
+            "rust" | "rs" => {
+                // Extract function calls, types, and keywords
+                for line in code.lines() {
+                    // Function calls
+                    if let Some(pos) = line.find('(') {
+                        let before_paren = &line[..pos];
+                        if let Some(last_space) = before_paren.rfind(' ') {
+                            let func_name = before_paren[last_space + 1..].trim();
+                            if func_name.len() > 2 && func_name.chars().all(|c| c.is_alphanumeric() || c == '_') {
+                                keywords.push(func_name.to_string());
+                            }
+                        }
+                    }
+
+                    // Types (PascalCase)
+                    for word in line.split_whitespace() {
+                        if word.chars().next().map_or(false, |c| c.is_uppercase()) {
+                            if word.len() > 2 && word.len() < 50 {
+                                keywords.push(word.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+            "python" | "py" => {
+                // Python-specific extraction
+                for line in code.lines() {
+                    let trimmed = line.trim();
+
+                    // Function calls
+                    if trimmed.contains('(') && !trimmed.starts_with('#') {
+                        if let Some(pos) = trimmed.find('(') {
+                            let func_name = trimmed[..pos].trim();
+                            if func_name.len() > 2 && func_name.chars().all(|c| c.is_alphanumeric() || c == '_') {
+                                keywords.push(func_name.to_string());
+                            }
+                        }
+                    }
+
+                    // Class names (PascalCase after 'class')
+                    if trimmed.starts_with("class ") {
+                        let rest = &trimmed[6..];
+                        if let Some(pos) = rest.find(|c| c == '(' || c == ':') {
+                            let class_name = rest[..pos].trim();
+                            if !class_name.is_empty() {
+                                keywords.push(class_name.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+            "javascript" | "typescript" | "js" | "ts" => {
+                // JS/TS-specific extraction
+                for line in code.lines() {
+                    let trimmed = line.trim();
+
+                    // Function calls
+                    if trimmed.contains('(') && !trimmed.starts_with("//") {
+                        if let Some(pos) = trimmed.find('(') {
+                            let before = &trimmed[..pos];
+                            if let Some(last_space) = before.rfind(' ') {
+                                let func_name = before[last_space + 1..].trim();
+                                if func_name.len() > 2 && func_name.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '$') {
+                                    keywords.push(func_name.to_string());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {
+                // Generic extraction for other languages
+            }
+        }
+
+        // Remove duplicates while preserving order
+        let mut seen = std::collections::HashSet::new();
+        keywords.retain(|k| seen.insert(k.clone()));
+
+        keywords
+    }
 }
 
 impl Default for VectorBuilder {
@@ -499,5 +681,116 @@ mod tests {
         assert_eq!(msg_chunks.len(), 1);
         assert_eq!(file_chunks.len(), 1);
         assert_eq!(commit_chunks.len(), 1);
+    }
+
+    #[test]
+    fn test_format_code_chunk() {
+        let builder = VectorBuilder::new();
+
+        let formatted = builder.format_code_chunk(
+            "fn hello() {\n    println!(\"Hello\");\n}",
+            "hello",
+            "Function",
+            "src/main.rs",
+            10,
+            12,
+            "main",
+            Some("Prints hello message")
+        );
+
+        assert!(formatted.contains("Function: hello"));
+        assert!(formatted.contains("src/main.rs"));
+        assert!(formatted.contains("(lines 10-12)"));
+        assert!(formatted.contains("Branch: main"));
+        assert!(formatted.contains("Prints hello message"));
+        assert!(formatted.contains("fn hello()"));
+    }
+
+    #[test]
+    fn test_format_code_chunk_no_doc() {
+        let builder = VectorBuilder::new();
+
+        let formatted = builder.format_code_chunk(
+            "fn test() {}",
+            "test",
+            "Function",
+            "src/test.rs",
+            1,
+            1,
+            "main",
+            None
+        );
+
+        assert!(formatted.contains("Function: test"));
+        assert!(!formatted.contains("Doc:"));
+    }
+
+    #[test]
+    fn test_extract_code_context_rust() {
+        let builder = VectorBuilder::new();
+
+        let code = r#"
+fn main() {
+    let result = process_data();
+    println!("Result: {}", result);
+}
+
+fn process_data() -> i32 {
+    42
+}
+"#;
+
+        let keywords = builder.extract_code_context(code, "rust");
+
+        // Should extract function names
+        assert!(keywords.iter().any(|k| k.contains("main")));
+        assert!(keywords.iter().any(|k| k.contains("process_data")));
+    }
+
+    #[test]
+    fn test_extract_code_context_python() {
+        let builder = VectorBuilder::new();
+
+        let code = r#"
+class MyClass:
+    def method(self):
+        result = process()
+        return result
+
+def process():
+    return 42
+"#;
+
+        let keywords = builder.extract_code_context(code, "python");
+
+        // Should extract class name
+        assert!(keywords.iter().any(|k| k == "MyClass"));
+    }
+
+    #[test]
+    fn test_extract_code_context_empty() {
+        let builder = VectorBuilder::new();
+
+        let keywords = builder.extract_code_context("", "rust");
+
+        assert!(keywords.is_empty());
+    }
+
+    #[test]
+    fn test_extract_code_context_removes_duplicates() {
+        let builder = VectorBuilder::new();
+
+        let code = r#"
+fn test() {
+    test();
+    test();
+}
+"#;
+
+        let keywords = builder.extract_code_context(code, "rust");
+
+        // "test" should appear only once
+        let test_count = keywords.iter().filter(|k| k.contains("test")).count();
+        assert_eq!(test_count, 1);
     }
 }

@@ -5,6 +5,7 @@
 Develop a Rust tool to build a **complete time-aware RAG knowledge base** for projects, including:
 - **Session Records**: Claude Code interaction history (user input + AI output)
 - **Source Files**: Project code with hierarchical indexing (file-level + function/class-level)
+- **Code Symbols**: ⭐ Symbol-level indexing with branch awareness (functions, classes, methods)
 - **Documentation**: README, design docs, comments, etc.
 - **Other Files**: Configs, test cases, etc.
 - **Git History**: Commit history and diffs with temporal context ⭐
@@ -720,13 +721,13 @@ src/
 │   ├── session.rs       # Session struct
 │   ├── message.rs       # Message struct
 │   ├── file.rs          # File struct
-│   ├── symbol.rs        # Symbol (function/class) struct
+│   ├── symbol.rs        # Symbol struct with branch awareness ⭐
 │   ├── commit.rs        # ⭐ Git commit struct
 │   └── diff.rs          # ⭐ Git diff struct
 │
 ├── storage/             # Storage layer (sled + HNSW)
 │   ├── mod.rs
-│   ├── sled.rs          # sled KV database wrapper
+│   ├── sled.rs          # sled KV database wrapper with branch-aware storage ⭐
 │   └── hnsw.rs          # HNSW vector index implementation
 │
 ├── collector/           # Data collectors
@@ -742,16 +743,24 @@ src/
 │   ├── git_sync.rs      # ⭐ Git state sync with persistent caching
 │   └── timeline.rs      # Timeline builder
 │
+├── ⭐ Code Symbol Indexing Module
+│   ├── code_chunker.rs   # 3-tier code chunking (symbol/block/file) ⭐
+│   ├── branch.rs         # Git branch detection and isolation ⭐
+│   ├── symbol_cache.rs   # 3-tier symbol caching (L1/L2/L3) ⭐
+│   └── indexer.rs        # Extended with symbol indexing ⭐
+│
 ├── embedding.rs         # Zhipu AI embedding-3 API client
 ├── parser.rs            # Session JSONL parsing
 ├── scanner.rs           # File scanning with .gitignore support
 ├── ast.rs               # AST parsing (Tree-sitter wrapper)
-├── vector.rs            # Vector building (chunking strategies)
+├── vector.rs            # Vector building with code formatting ⭐
 ├── hook.rs              # Hook system (session-start)
 ├── daemon.rs            # Daemon service (fsnotify + incremental indexing)
 ├── skills.rs            # Skills generator
-├── mcp.rs               # MCP Server implementation
+├── mcp.rs               # MCP Server with granularity parameter ⭐
+├── query.rs             # Query executor with symbol support ⭐
 └── formatter.rs         # ⭐ Result formatting (markdown + timeline)
+
 
 tests/
 ├── integration/         # Integration tests
@@ -785,11 +794,11 @@ skills/
 | `src/models/session.rs` | Session struct for Claude Code sessions |
 | `src/models/message.rs` | Message struct (user/assistant/tool) |
 | `src/models/file.rs` | File struct (source/docs) |
-| `src/models/symbol.rs` | Symbol struct (functions/classes) |
+| `src/models/symbol.rs` | Symbol struct (functions/classes) with branch awareness ⭐ |
 | `src/models/commit.rs` | ⭐ Git commit metadata |
 | `src/models/diff.rs` | ⭐ Git diff content |
 | **`src/storage/`** | **Storage layer (modular)** |
-| `src/storage/sled.rs` | sled KV database wrapper |
+| `src/storage/sled.rs` | sled KV database wrapper with branch-aware symbol storage ⭐ |
 | `src/storage/hnsw.rs` | HNSW vector index (self-implemented) |
 | **`src/collector/`** | **Data collectors (modular)** |
 | `src/collector/session.rs` | Session JSONL parsing |
@@ -1490,3 +1499,94 @@ The GitSync module integrates with:
 - **Query Processing**: Filters results based on current/deprecated status
 - **Indexing**: Updates cache when new files are indexed
 - **Daemon Operations**: Persists cache during incremental indexing
+
+---
+
+## ⭐ Code Symbol Indexing with Branch Awareness
+
+### Overview
+
+Code symbol indexing provides **function/class/method-level semantic search** with Git branch isolation:
+
+- **3-tier chunking strategy**: Symbol → Block → File levels
+- **Branch-aware storage**: Separate symbol indices per Git branch
+- **Semantic search**: Find functions by meaning, not just keywords
+- **MCP granularity**: Support `symbol`, `file`, and `mixed` search modes
+
+### Architecture
+
+\`\`\`
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    Code Symbol Indexing Pipeline                     │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐                 │
+│  │   File       │    │   Ast       │    │  Code       │                 │
+│  │   Scanner    │───▶│   Parser    │───▶│  Chunker    │                 │
+│  └─────────────┘    └─────────────┘    └─────────────┘                 │
+│         │                  │                  │                         │
+│         ▼                  ▼                  ▼                         │
+│  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐                 │
+│  │  Branch      │    │   Symbol     │    │   Symbol    │                 │
+│  │  Manager     │    │   Cache      │    │   Indexer   │                 │
+│  └─────────────┘    └─────────────┘    └─────────────┘                 │
+│         │                  │                  │                         │
+│         ▼                  ▼                  ▼                         │
+│  ┌─────────────────────────────────────────────────────────────────┐    │
+│  │                    Storage Layer                               │    │
+│  └─────────────────────────────────────────────────────────────────┘    │
+│                                                                          │
+└─────────────────────────────────────────────────────────────────────────┘
+\`\`\`
+
+### 3-Tier Chunking Strategy
+
+| Level | Threshold | Description | Example |
+|-------|-----------|-------------|---------|
+| **Symbol** | < 500 lines | Individual function/class | \`fn authenticate_user()\` |
+| **Block** | > 500 lines | Large symbol split into 300-line chunks | \`impl Auth (lines 1-300)\` |
+| **File** | Fallback | File summary when AST parsing fails | \`src/auth.rs overview\` |
+
+### Branch-Aware Storage
+
+**Storage Keys:**
+\`\`\`
+# Individual symbol (branch-aware)
+symbol:{branch}:{symbol_id}
+Example: symbol:main:symbol:abc123
+
+# Branch symbol index
+branch_symbols:{branch}
+Example: branch_symbols:main
+\`\`\`
+
+### CLI Integration
+
+**New Command:**
+\`\`\`bash
+claude-rag index-code --branch main    # Index current branch
+claude-rag index-code --all              # Index all branches
+\`\`\`
+
+### MCP Granularity Parameter
+
+| Mode | Description | Use Case |
+|------|-------------|----------|
+| \`symbol\` | Search function/class symbols | Find specific implementations |
+| \`file\` | Search file-level content | Find relevant files |
+| \`mixed\` | Return both symbols and files | Comprehensive search |
+
+### Implementation Status
+
+| Component | Status | Tests |
+|-----------|--------|-------|
+| CodeChunker | ✅ Complete | 12/12 |
+| BranchManager | ✅ Complete | 20/20 |
+| Symbol Cache | ✅ Complete | 8/8 |
+| Storage Extensions | ✅ Complete | 38/38 |
+| Indexer Extensions | ✅ Complete | 22/22 |
+| MCP Granularity | ✅ Complete | 6/6 |
+| CLI Integration | ✅ Complete | All passing |
+
+**Total: 649 tests passing**
+

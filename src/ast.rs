@@ -146,6 +146,8 @@ impl AstParser {
             doc_comment,
             code,
             parent_id,
+            branch_name: String::new(),
+            last_commit_hash: None,
         }))
     }
 
@@ -255,6 +257,8 @@ impl AstParser {
             doc_comment,
             code,
             parent_id,
+            branch_name: String::new(),
+            last_commit_hash: None,
         }))
     }
 
@@ -333,6 +337,8 @@ impl AstParser {
             doc_comment,
             code,
             parent_id,
+            branch_name: String::new(),
+            last_commit_hash: None,
         }))
     }
 
@@ -366,6 +372,8 @@ impl AstParser {
             doc_comment,
             code,
             parent_id,
+            branch_name: String::new(),
+            last_commit_hash: None,
         }))
     }
 
@@ -457,6 +465,8 @@ impl AstParser {
             doc_comment,
             code,
             parent_id,
+            branch_name: String::new(),
+            last_commit_hash: None,
         }))
     }
 
@@ -490,6 +500,8 @@ impl AstParser {
             doc_comment,
             code,
             parent_id,
+            branch_name: String::new(),
+            last_commit_hash: None,
         }))
     }
 
@@ -523,6 +535,8 @@ impl AstParser {
             doc_comment,
             code,
             parent_id,
+            branch_name: String::new(),
+            last_commit_hash: None,
         }))
     }
 
@@ -561,6 +575,8 @@ impl AstParser {
             doc_comment,
             code,
             parent_id,
+            branch_name: String::new(),
+            last_commit_hash: None,
         }))
     }
 
