@@ -103,7 +103,7 @@ Each project has its own `.rag/` directory:
 ### 1. Installation
 
 ```bash
-git clone https://github.com/yourusername/claude-rag.git
+git clone https://github.com/unclemate/claude-rag.git
 cd claude-rag
 cargo install --path .
 ```

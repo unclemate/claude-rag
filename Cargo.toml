@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 description = "Claude Code Interaction History & Knowledge Base Tool"
 license = "MIT"
-repository = "https://github.com/yourusername/claude-rag"
+repository = "https://github.com/unclemate/claude-rag"
 
 [dependencies]
 # Async runtime

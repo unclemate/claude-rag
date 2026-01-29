@@ -50,7 +50,7 @@ rustup component add rust-analyzer
 ### 1. Clone Repository
 
 ```bash
-git clone https://github.com/yourusername/claude-rag.git
+git clone https://github.com/unclemate/claude-rag.git
 cd claude-rag
 ```
 
