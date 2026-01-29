@@ -59,6 +59,8 @@ pub struct LoggingOptions {
     pub include_spans: bool,
     /// 是否启用每日轮转
     pub daily_rotation: bool,
+    /// 是否在日志中包含源文件名和行号
+    pub with_source_location: bool,
 }
 
 impl Default for LoggingOptions {
@@ -70,6 +72,7 @@ impl Default for LoggingOptions {
             json_format: true,
             include_spans: false,
             daily_rotation: true,
+            with_source_location: true,
         }
     }
 }
@@ -148,6 +151,8 @@ pub fn init_logging(
         } else {
             FmtSpan::NONE
         })
+        .with_file(config.with_source_location)
+        .with_line_number(config.with_source_location)
         .with_filter(env_filter.clone());
 
     if config.enable_file_logging {
@@ -167,12 +172,25 @@ pub fn init_logging(
         if config.json_format {
             tracing_subscriber::registry()
                 .with(console_layer)
-                .with(fmt::layer().json().with_writer(non_blocking).with_filter(env_filter.clone()))
+                .with(
+                    fmt::layer()
+                        .json()
+                        .with_writer(non_blocking)
+                        .with_file(config.with_source_location)
+                        .with_line_number(config.with_source_location)
+                        .with_filter(env_filter.clone())
+                )
                 .init();
         } else {
             tracing_subscriber::registry()
                 .with(console_layer)
-                .with(fmt::layer().with_writer(non_blocking).with_filter(env_filter.clone()))
+                .with(
+                    fmt::layer()
+                        .with_writer(non_blocking)
+                        .with_file(config.with_source_location)
+                        .with_line_number(config.with_source_location)
+                        .with_filter(env_filter.clone())
+                )
                 .init();
         }
 
@@ -228,5 +246,6 @@ mod tests {
         assert!(config.json_format);
         assert!(config.daily_rotation);
         assert!(!config.include_spans);
+        assert!(config.with_source_location);
     }
 }

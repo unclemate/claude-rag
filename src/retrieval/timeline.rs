@@ -8,6 +8,7 @@ use crate::error::Result;
 use crate::models::{Commit, Session};
 use chrono::{DateTime, Utc};
 use std::collections::{HashMap, BTreeMap};
+use tracing::info;
 
 /// Feature timeline for tracking evolution.
 pub struct FeatureTimeline;
@@ -28,6 +29,13 @@ impl FeatureTimeline {
     /// # Returns
     /// * `Vec<TimelineEvent>` - Sorted timeline events
     pub fn build(&self, commits: &[Commit], sessions: &[Session], topic: Option<&str>) -> Vec<TimelineEvent> {
+        info!(
+            "Building timeline: {} commits, {} sessions, topic={:?}",
+            commits.len(),
+            sessions.len(),
+            topic
+        );
+
         let mut events = Vec::new();
 
         // Add commit events

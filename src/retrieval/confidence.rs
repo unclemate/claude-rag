@@ -2,6 +2,7 @@
 
 use crate::models::ContentType;
 use serde::{Deserialize, Serialize};
+use tracing::trace;
 
 /// Confidence level for indexed content.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -63,6 +64,11 @@ impl ConfidenceScore {
                 }
             }
         };
+
+        trace!(
+            "Calculated confidence: type={:?}, age_days={} -> level={:?}, weight={}",
+            content_type, age_days, level, level.base_weight()
+        );
 
         Self {
             level,

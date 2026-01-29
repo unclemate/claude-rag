@@ -19,6 +19,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
+use tracing::{debug, info};
 
 /// Git synchronization status for a file or symbol.
 #[derive(Debug, Clone, PartialEq)]
@@ -323,8 +324,11 @@ impl GitSync {
             return Ok(HashMap::new());
         }
 
+        info!("Batch checking {} files for Git sync status", file_paths.len());
+
         // Check if we have a Git repository
         if self.repo.is_none() {
+            debug!("No Git repository found, marking all files as NotApplicable");
             let mut results = HashMap::new();
             for path in file_paths {
                 results.insert(path.clone(), GitSyncStatus::NotApplicable);

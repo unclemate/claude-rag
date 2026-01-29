@@ -9,6 +9,7 @@ use crate::models::diff::ChangeType;
 use chrono::{DateTime, TimeZone, Utc};
 use git2::{Diff, Oid, Repository, Time};
 use std::path::{Path, PathBuf};
+use tracing::{debug, info, trace, warn};
 
 /// Conventional commit types.
 const CONVENTIONAL_TYPES: &[&str] = &[
@@ -32,6 +33,7 @@ impl GitCollector {
     /// # Returns
     /// * `Result<Self>` - The collector or error if not a Git repository
     pub fn new(project_path: &Path) -> Result<Self> {
+        debug!("Creating GitCollector for project: {}", project_path.display());
         let repo_path = project_path.to_path_buf();
         let repo = Repository::discover(project_path)
             .map_err(|e| RagError::Git(format!("Failed to open repository: {e}")))?;
@@ -55,6 +57,10 @@ impl GitCollector {
     /// # Returns
     /// * `Result<Vec<Commit>>` - List of commits
     pub fn collect_all_commits(&self, max_count: Option<usize>) -> Result<Vec<Commit>> {
+        info!(
+            max_count = max_count,
+            "Collecting commits from repository"
+        );
         let repo = self.repo();
         let mut revwalk = repo.revwalk()
             .map_err(|e| RagError::Git(format!("Failed to create revwalk: {e}")))?;
@@ -79,6 +85,14 @@ impl GitCollector {
             commits.push(self.convert_commit(&commit, repo)?);
         }
 
+        info!(
+            commits_count = commits.len(),
+            "Collected commits from repository"
+        );
+        debug!(
+            commits = ?commits.iter().map(|c| &c.short_hash).collect::<Vec<_>>(),
+            "Commit list"
+        );
         Ok(commits)
     }
 
@@ -90,6 +104,7 @@ impl GitCollector {
     /// # Returns
     /// * `Result<Vec<GitDiff>>` - List of file diffs
     pub fn get_file_diffs(&self, commit_id: &str) -> Result<Vec<GitDiff>> {
+        debug!("Getting file diffs for commit: {}", commit_id);
         let repo = self.repo();
         let oid = Oid::from_str(commit_id)
             .map_err(|e| RagError::Git(format!("Invalid commit ID: {e}")))?;
@@ -116,6 +131,7 @@ impl GitCollector {
             diffs.push(file_diff);
         }
 
+        debug!("Found {} file diffs for commit {}", diffs.len(), commit_id);
         Ok(diffs)
     }
 
@@ -158,6 +174,11 @@ impl GitCollector {
             .any(|line| line.to_uppercase().contains("BREAKING CHANGE"));
 
         let is_breaking = is_breaking || has_breaking_footer;
+
+        trace!(
+            "Parsed conventional commit: type={:?}, scope={:?}, breaking={}",
+            conv_type, scope, is_breaking
+        );
 
         (conv_type, scope, is_breaking)
     }
@@ -348,7 +369,11 @@ impl GitCollector {
     /// # Returns
     /// * `bool` - true if it's a Git repository
     pub fn is_git_repository(project_path: &Path) -> bool {
-        Repository::discover(project_path).is_ok()
+        let is_git = Repository::discover(project_path).is_ok();
+        if !is_git {
+            warn!("Not a Git repository: {}", project_path.display());
+        }
+        is_git
     }
 
     /// Get commits since a specific date.

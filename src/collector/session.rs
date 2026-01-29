@@ -6,7 +6,7 @@ use crate::progress::ProgressReporter;
 use crate::storage::sled::StorageManager;
 use chrono::{DateTime, Utc};
 use std::path::{Path, PathBuf};
-use tracing::warn;
+use tracing::{debug, info, warn};
 
 /// Collection statistics for sessions.
 #[derive(Debug, Clone, Default)]
@@ -35,6 +35,10 @@ impl SessionCollector {
     /// # Arguments
     /// * `config_dir` - Optional custom Claude config directory
     pub fn new(config_dir: Option<PathBuf>) -> Self {
+        debug!(
+            "Creating SessionCollector with config_dir: {:?}",
+            config_dir
+        );
         let parser = SessionParser::new(config_dir);
         Self {
             parser,
@@ -53,11 +57,13 @@ impl SessionCollector {
     /// # Returns
     /// * `Vec<String>` - List of project paths with sessions
     pub fn scan_projects(&self) -> Result<Vec<String>> {
+        debug!("Scanning for Claude projects with sessions");
         let projects = self.parser.scan_claude_projects()?;
 
         let mut project_paths: Vec<String> = projects.keys().cloned().collect();
         project_paths.sort();
 
+        info!("Found {} projects with sessions", project_paths.len());
         Ok(project_paths)
     }
 
@@ -68,10 +74,12 @@ impl SessionCollector {
     pub fn collect_sessions(&self) -> Result<Vec<ParsedSession>> {
         if let Some(project_path) = &self.project_path {
             // Collect from specific project
+            debug!("Collecting sessions from specific project: {}", project_path.display());
             let sessions = self.parser.parse_project_sessions(project_path)?;
             Ok(sessions)
         } else {
             // Collect from all projects
+            debug!("Collecting sessions from all projects");
             let projects = self.parser.scan_claude_projects()?;
             let mut all_sessions = Vec::new();
 
@@ -89,6 +97,7 @@ impl SessionCollector {
                 }
             }
 
+            info!("Collected {} sessions from all projects", all_sessions.len());
             Ok(all_sessions)
         }
     }
@@ -101,6 +110,7 @@ impl SessionCollector {
     /// # Returns
     /// * `Vec<ParsedSession>` - List of sessions that need indexing
     pub fn collect_incremental(&self, storage: &StorageManager) -> Result<Vec<ParsedSession>> {
+        debug!("Collecting sessions incrementally");
         let all_sessions = self.collect_sessions()?;
         let mut needs_indexing = Vec::new();
 
@@ -113,6 +123,10 @@ impl SessionCollector {
                 // Check if messages have changed
                 let current_msg_count = parsed.messages.len();
                 if current_msg_count != existing.message_count {
+                    debug!(
+                        "Session {} message count changed: {} -> {}",
+                        session_id, existing.message_count, current_msg_count
+                    );
                     needs_indexing.push(parsed);
                     continue;
                 }
@@ -126,14 +140,20 @@ impl SessionCollector {
                 // Get session directory path
                 let session_dir = self.get_session_dir(session_id)?;
                 if self.parser.needs_indexing(&session_dir, indexed_time)? {
+                    debug!("Session {} needs indexing (modified)", session_id);
                     needs_indexing.push(parsed);
                 }
             } else {
                 // New session
+                debug!("Session {} is new, needs indexing", session_id);
                 needs_indexing.push(parsed);
             }
         }
 
+        info!(
+            "Incremental collection: {} sessions need indexing",
+            needs_indexing.len()
+        );
         Ok(needs_indexing)
     }
 

@@ -6,6 +6,7 @@
 use std::path::Path;
 use std::collections::{HashMap, HashSet};
 use serde::{Deserialize, Serialize, Serializer, Deserializer};
+use tracing::{debug, info};
 
 use crate::error::Result;
 use crate::models::ContentType;
@@ -86,6 +87,10 @@ impl<'de> Deserialize<'de> for HnswIndex {
 impl HnswIndex {
     /// Create a new HNSW index.
     pub fn new(m: usize, ef_construction: usize, ef_search: usize) -> Self {
+        debug!(
+            "Creating new HNSW index: m={}, ef_construction={}, ef_search={}",
+            m, ef_construction, ef_search
+        );
         let ml = 1.0 / (m as f64).ln();
         Self {
             nodes: HashMap::new(),
@@ -275,6 +280,11 @@ impl HnswIndex {
         k: usize,
         content_type_filter: Option<ContentType>,
     ) -> Result<Vec<(String, f32)>> {
+        debug!(
+            "HNSW search: k={}, filter={:?}, nodes={}",
+            k, content_type_filter, self.nodes.len()
+        );
+
         if self.nodes.is_empty() {
             return Ok(Vec::new());
         }
@@ -299,20 +309,26 @@ impl HnswIndex {
 
         // Return top-k results
         results.truncate(k);
+
+        debug!("HNSW search returned {} results", results.len());
         Ok(results)
     }
 
     /// Save index to disk.
     pub fn save(&self, path: &Path) -> Result<()> {
+        info!("Saving HNSW index to {}", path.display());
         let data = serde_json::to_vec_pretty(self)?;
         std::fs::write(path, data)?;
+        info!("HNSW index saved successfully ({} nodes)", self.nodes.len());
         Ok(())
     }
 
     /// Load index from disk.
     pub fn load(path: &Path) -> Result<Self> {
+        debug!("Loading HNSW index from {}", path.display());
         let data = std::fs::read(path)?;
         let index: HnswIndex = serde_json::from_slice(&data)?;
+        info!("HNSW index loaded successfully ({} nodes)", index.nodes.len());
         Ok(index)
     }
 

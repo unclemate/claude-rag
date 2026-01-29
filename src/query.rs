@@ -22,6 +22,7 @@ use crate::storage::{hnsw::HnswIndex, StorageManager};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
+use tracing::{debug, info};
 
 /// Default top-k results for different query types.
 #[allow(dead_code)]
@@ -465,6 +466,13 @@ impl QueryExecutor {
     ///
     /// Returns formatted query results as a string.
     pub async fn execute(&mut self, options: &QueryOptions) -> Result<String> {
+        info!(
+            query = %options.query,
+            top_k = options.top_k,
+            content_type = ?options.content_type,
+            "Executing query"
+        );
+
         // Validate options
         options.validate()?;
 
@@ -485,9 +493,11 @@ impl QueryExecutor {
 
         // Parse content type filter
         let content_filter = options.parse_content_type_filter();
+        debug!(content_filter = ?content_filter, "Content filter");
 
         // Execute search
         let raw_results = index.search(&query_embedding, options.top_k, content_filter)?;
+        debug!(results_count = raw_results.len(), "Retrieved raw results");
 
         if raw_results.is_empty() {
             return Ok(self.format_no_results_message(options));
@@ -496,6 +506,10 @@ impl QueryExecutor {
         // Enhance results with metadata and time-aware scoring
         let enhanced_results = self.enhance_results(&raw_results, options).await?;
 
+        info!(
+            results_count = enhanced_results.len(),
+            "Query completed"
+        );
         // Format output
         self.format_results(&enhanced_results, options)
     }

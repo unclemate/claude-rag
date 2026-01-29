@@ -1,5 +1,7 @@
 //! Time decay calculator for temporal scoring.
 
+use tracing::trace;
+
 /// Time decay calculator.
 pub struct TimeDecay;
 
@@ -14,7 +16,12 @@ impl TimeDecay {
     /// Decay factor between 0.0 and 1.0
     pub fn calculate(age_days: i64, decay_rate: f32) -> f32 {
         let days = age_days.max(0) as f32;
-        (-decay_rate * days).exp()
+        let decay = (-decay_rate * days).exp();
+        trace!(
+            "Time decay: age_days={} days, decay_rate={} -> factor={:.4}",
+            age_days, decay_rate, decay
+        );
+        decay
     }
 
     /// Calculate combined score from similarity and temporal factors.

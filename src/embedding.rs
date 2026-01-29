@@ -6,6 +6,7 @@ use reqwest::{Client, header};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use tokio::time::timeout;
+use tracing::{debug, info, trace, warn};
 
 use crate::error::{Result, RagError};
 use crate::config::EmbeddingConfig;
@@ -82,6 +83,11 @@ pub struct EmbeddingClient {
 impl EmbeddingClient {
     /// Create a new embedding client from config.
     pub fn from_config(config: &EmbeddingConfig) -> Self {
+        debug!(
+            "Creating EmbeddingClient: model={}, timeout={}ms",
+            "embedding-3",
+            config.timeout_ms
+        );
         let client = Client::builder()
             .timeout(Duration::from_millis(config.timeout_ms))
             .build()
@@ -98,6 +104,7 @@ impl EmbeddingClient {
 
     /// Create a new embedding client.
     pub fn new(api_token: String, api_url: Option<String>) -> Self {
+        debug!("Creating new EmbeddingClient");
         let client = Client::builder()
             .timeout(Duration::from_secs(DEFAULT_TIMEOUT_SECS))
             .build()
@@ -126,18 +133,34 @@ impl EmbeddingClient {
             return Ok(Vec::new());
         }
 
+        info!(
+            batch_size = texts.len(),
+            "Embedding batch of texts"
+        );
+
         let mut last_error = None;
 
         for attempt in 0..MAX_RETRIES {
             // Calculate delay with exponential backoff
             if attempt > 0 {
                 let delay = RETRY_DELAY_MS * 2_u64.pow(attempt - 1);
+                trace!(
+                    attempt = attempt + 1,
+                    delay_ms = delay,
+                    "Retry attempt"
+                );
                 tokio::time::sleep(Duration::from_millis(delay)).await;
             }
 
             // Try to send request
             match self.send_request(texts).await {
-                Ok(response) => return Ok(response),
+                Ok(response) => {
+                    debug!(
+                        embeddings_count = response.len(),
+                        "Successfully embedded texts"
+                    );
+                    return Ok(response);
+                }
                 Err(e) => {
                     // Check if error is retryable
                     let retryable = matches!(
@@ -146,6 +169,11 @@ impl EmbeddingClient {
                     );
 
                     if retryable && attempt < MAX_RETRIES - 1 {
+                        warn!(
+                            attempt = attempt + 1,
+                            error = %e,
+                            "Embedding request failed, retrying"
+                        );
                         last_error = Some(e);
                         continue;
                     } else {
@@ -162,6 +190,7 @@ impl EmbeddingClient {
 
     /// Send embedding request to API.
     async fn send_request(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
+        debug!("Sending embedding request to API ({} texts)", texts.len());
         let request = EmbeddingRequest {
             model: self.model.clone(),
             input: texts.to_vec(),
@@ -207,6 +236,7 @@ impl EmbeddingClient {
             }
         }
 
+        debug!("Received {} embeddings from API", embeddings.len());
         Ok(embeddings)
     }
 

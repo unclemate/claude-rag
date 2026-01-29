@@ -2,6 +2,7 @@
 
 use clap::{Parser, Subcommand};
 use anyhow::Result;
+use tracing::{debug, error, info, warn};
 
 // Import the ProgressReporter trait so its methods are available
 use claude_rag::ProgressReporter;
@@ -108,7 +109,7 @@ async fn main() -> Result<()> {
     // 日志初始化失败时仅警告，不影响程序运行
     let _log_guard = match claude_rag::logging::init_logging_default(&project_path) {
         Ok(guard) => {
-            tracing::info!("Logging system initialized");
+            info!("Logging system initialized");
             guard
         }
         Err(e) => {
@@ -148,6 +149,7 @@ async fn main() -> Result<()> {
 }
 
 fn handle_init(force: bool) -> Result<()> {
+    info!("Initializing knowledge base (force: {})", force);
     println!("Initializing knowledge base...");
 
     let current_dir = std::env::current_dir()
@@ -155,6 +157,7 @@ fn handle_init(force: bool) -> Result<()> {
 
     match claude_rag::cli::init_project(&current_dir, force) {
         Ok(claude_rag::cli::InitResult::Success { rag_dir, storage_size }) => {
+            info!("Knowledge base initialized at {}, storage size: {} bytes", rag_dir.display(), storage_size);
             println!("✓ Knowledge base initialized");
             println!("  Location: {}", rag_dir.display());
             println!("  Storage size: {} bytes", storage_size);
@@ -163,11 +166,13 @@ fn handle_init(force: bool) -> Result<()> {
             println!("  2. Run: claude-rag index");
         }
         Ok(claude_rag::cli::InitResult::AlreadyExists) => {
+            warn!("Knowledge base already exists at {}", current_dir.display());
             println!("✗ Knowledge base already exists");
             println!("  Use --force to re-initialize");
             std::process::exit(1);
         }
         Err(e) => {
+            error!("Failed to initialize knowledge base: {}", e);
             println!("✗ Failed to initialize: {}", e);
             std::process::exit(1);
         }
@@ -185,6 +190,11 @@ fn handle_index(_all: bool, _project: Option<String>, force: bool, r#type: Optio
     let index_docs = r#type.as_deref().unwrap_or("all") == "all" || r#type.as_deref().unwrap_or("all") == "docs";
     let index_sessions = r#type.as_deref().unwrap_or("all") == "all" || r#type.as_deref().unwrap_or("all") == "sessions";
 
+    info!(
+        "Starting indexing (source: {}, docs: {}, sessions: {}, force: {})",
+        index_source, index_docs, index_sessions, force
+    );
+
     let options = claude_rag::cli::IndexOptions {
         index_source,
         index_docs,
@@ -197,6 +207,7 @@ fn handle_index(_all: bool, _project: Option<String>, force: bool, r#type: Optio
     let config = match claude_rag::ConfigManager::load(Some(&current_dir)) {
         Ok(config) => config,
         Err(e) => {
+            warn!("Failed to load config, using defaults: {}", e);
             eprintln!("Warning: Failed to load config, using defaults: {}", e);
             eprintln!("  Run 'claude-rag init' to create a configuration file");
             claude_rag::Config::default()
@@ -209,6 +220,13 @@ fn handle_index(_all: bool, _project: Option<String>, force: bool, r#type: Optio
     match claude_rag::cli::index_project(&current_dir, options, Some(&reporter)) {
         Ok(result) => {
             reporter.finish();
+
+            info!(
+                "Indexing complete: {} files, {} sessions, {} errors",
+                result.file_stats.files_collected,
+                result.session_stats.sessions_collected,
+                result.errors
+            );
 
             println!("✓ Indexing complete");
             println!("  Files indexed: {}", result.file_stats.files_collected);
@@ -234,6 +252,7 @@ fn handle_index(_all: bool, _project: Option<String>, force: bool, r#type: Optio
             }
         }
         Err(e) => {
+            error!("Failed to index: {}", e);
             println!("✗ Failed to index: {}", e);
             std::process::exit(1);
         }
@@ -245,21 +264,25 @@ fn handle_index(_all: bool, _project: Option<String>, force: bool, r#type: Optio
 fn handle_daemon(daemon_cmd: DaemonCommands) -> Result<()> {
     match daemon_cmd {
         DaemonCommands::Start => {
+            info!("Starting daemon");
             println!("Starting daemon...");
             // TODO: Implement daemon start
             println!("✓ Daemon started");
         }
         DaemonCommands::Stop => {
+            info!("Stopping daemon");
             println!("Stopping daemon...");
             // TODO: Implement daemon stop
             println!("✓ Daemon stopped");
         }
         DaemonCommands::Status => {
+            debug!("Checking daemon status");
             println!("Daemon status:");
             // TODO: Implement status check
             println!("  Status: stopped");
         }
         DaemonCommands::Restart => {
+            info!("Restarting daemon");
             println!("Restarting daemon...");
             // TODO: Implement restart
             println!("✓ Daemon restarted");
@@ -278,6 +301,11 @@ fn handle_query(
     before: Option<String>,
     max_age: Option<u64>,
 ) -> Result<()> {
+    debug!(
+        "Query parameters: query='{}', type={:?}, top_k={}, timeline={}, format={}",
+        query, r#type, top_k, timeline, format
+    );
+
     // Parse time range if specified
     let time_range = if after.is_some() || before.is_some() || max_age.is_some() {
         Some(claude_rag::query::TimeRange::from_cli_args(
@@ -289,6 +317,8 @@ fn handle_query(
         None
     };
 
+    info!("Executing query: {}", query);
+
     // Use tokio runtime for async query execution
     let runtime = tokio::runtime::Runtime::new()?;
     let result = runtime.block_on(claude_rag::execute_query_with_time_range(
@@ -299,11 +329,14 @@ fn handle_query(
         format,
         time_range,
     ))?;
+
+    info!("Query executed successfully");
     println!("{}", result);
     Ok(())
 }
 
 fn handle_status() -> Result<()> {
+    info!("Checking system status");
     println!("Status:");
     // TODO: Implement status
     println!("  Database: initialized");
@@ -312,14 +345,22 @@ fn handle_status() -> Result<()> {
 }
 
 fn handle_install_skills() -> Result<()> {
+    info!("Installing Claude Code Skills");
     println!("Installing Claude Code Skills...");
 
     let installer = claude_rag::skills::SkillsInstaller::new()
-        .map_err(|e| anyhow::anyhow!("Failed to create skills installer: {}", e))?;
+        .map_err(|e| {
+            error!("Failed to create skills installer: {}", e);
+            anyhow::anyhow!("Failed to create skills installer: {}", e)
+        })?;
 
     installer.install_skills()
-        .map_err(|e| anyhow::anyhow!("Failed to install skills: {}", e))?;
+        .map_err(|e| {
+            error!("Failed to install skills: {}", e);
+            anyhow::anyhow!("Failed to install skills: {}", e)
+        })?;
 
+    info!("Skills installed to {}", installer.skills_dir().display());
     println!("✓ Skills installed to: {}", installer.skills_dir().display());
     println!("  Available skills:");
     println!("    /rag-query     - Query all indexed content");

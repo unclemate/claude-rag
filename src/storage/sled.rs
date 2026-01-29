@@ -2,6 +2,7 @@
 
 use sled::Db;
 use std::path::{Path, PathBuf};
+use tracing::info;
 
 use crate::error::{Result, RagError};
 use crate::models::{Commit, File, GitDiff, Message, Session, Symbol};
@@ -24,9 +25,11 @@ impl StorageManager {
         std::fs::create_dir_all(&db_dir)
             .map_err(RagError::Io)?;
 
+        info!("Opening project database at {}", db_dir.display());
         let db = sled::open(&db_dir)
             .map_err(RagError::Sled)?;
 
+        info!("Project database opened successfully");
         Ok(Self {
             db,
             project_path: project_path.to_path_buf(),

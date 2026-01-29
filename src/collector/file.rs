@@ -10,7 +10,7 @@ use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use tracing::warn;
+use tracing::{debug, info, trace, warn};
 
 /// File chunk for indexing.
 #[derive(Debug, Clone)]
@@ -54,6 +54,10 @@ impl FileCollector {
     /// # Arguments
     /// * `project_path` - Path to the project root
     pub fn new(project_path: &Path) -> Result<Self> {
+        debug!(
+            "Creating FileCollector for project: {}",
+            project_path.display()
+        );
         let scanner = FileScanner::new(project_path)?;
 
         Ok(Self {
@@ -91,6 +95,12 @@ impl FileCollector {
         index_docs: bool,
         index_other: bool,
     ) -> Result<Vec<File>> {
+        info!(
+            index_source = index_source,
+            index_docs = index_docs,
+            index_other = index_other,
+            "Collecting files from project"
+        );
         let scanned_files = self.scanner.scan(index_source, index_docs, index_other)?;
 
         let files: Vec<File> = scanned_files
@@ -98,6 +108,10 @@ impl FileCollector {
             .map(|scanned| self.scanner.to_file_model(&scanned))
             .collect();
 
+        info!(
+            files_count = files.len(),
+            "Collected files from project"
+        );
         Ok(files)
     }
 
@@ -118,6 +132,13 @@ impl FileCollector {
         index_docs: bool,
         index_other: bool,
     ) -> Result<(Vec<File>, Vec<String>)> {
+        debug!(
+            index_source = index_source,
+            index_docs = index_docs,
+            index_other = index_other,
+            "Collecting incremental file changes"
+        );
+
         // Build map of indexed files using relative paths as keys
         let project_files = storage.get_project_files(&self.project_path.to_string_lossy())?;
         let mut indexed_files = HashMap::new();
@@ -129,6 +150,11 @@ impl FileCollector {
             }
         }
 
+        debug!(
+            indexed_files_count = indexed_files.len(),
+            "Found indexed files in storage"
+        );
+
         // Scan for changes
         let (changed_scanned, deleted_paths) = self
             .scanner
@@ -138,6 +164,12 @@ impl FileCollector {
             .into_iter()
             .map(|scanned| self.scanner.to_file_model(&scanned))
             .collect();
+
+        info!(
+            changed_files_count = changed_files.len(),
+            deleted_files_count = deleted_paths.len(),
+            "Incremental collection complete"
+        );
 
         Ok((changed_files, deleted_paths))
     }
@@ -150,6 +182,7 @@ impl FileCollector {
     /// # Returns
     /// * `String` - File content
     pub fn collect_file_content(&self, file_path: &Path) -> Result<String> {
+        trace!("Reading file content: {}", file_path.display());
         fs::read_to_string(file_path).map_err(RagError::Io)
     }
 
@@ -167,8 +200,16 @@ impl FileCollector {
     pub fn chunk_file_content(&self, content: &str, file_path: &Path) -> Vec<FileChunk> {
         // Early exit for empty content
         if content.is_empty() {
+            trace!("Skipping empty file: {}", file_path.display());
             return Vec::new();
         }
+
+        trace!(
+            "Chunking file content: {} ({} bytes, {} lines)",
+            file_path.display(),
+            content.len(),
+            content.lines().count()
+        );
 
         // Try document parsing for supported formats
         match DocumentParser::from_path(file_path) {
@@ -183,6 +224,11 @@ impl FileCollector {
 
         match parser.parse(content, file_path, &file_id) {
             Ok(doc_chunks) => {
+                trace!(
+                    "Document parser generated {} chunks for {}",
+                    doc_chunks.len(),
+                    file_path.display()
+                );
                 // Convert DocChunk to FileChunk
                 doc_chunks
                     .into_iter()
@@ -212,6 +258,14 @@ impl FileCollector {
             return Vec::new();
         }
 
+        trace!(
+            "Line-based chunking for {}: {} lines, chunk_size={}, overlap={}",
+            file_path.display(),
+            lines.len(),
+            self.chunk_size,
+            self.chunk_overlap
+        );
+
         let mut chunks = Vec::new();
         let mut start = 0;
 
@@ -240,6 +294,7 @@ impl FileCollector {
             }
         }
 
+        trace!("Created {} chunks for {}", chunks.len(), file_path.display());
         chunks
     }
 
@@ -265,6 +320,7 @@ impl FileCollector {
     /// # Returns
     /// * `CollectionStats` - Collection statistics
     pub fn store_files(&self, files: &[File], storage: &StorageManager) -> Result<CollectionStats> {
+        info!(files_count = files.len(), "Storing files to storage");
         let mut stats = CollectionStats {
             files_scanned: files.len(),
             ..Default::default()
@@ -285,6 +341,12 @@ impl FileCollector {
                 }
             }
         }
+
+        info!(
+            files_collected = stats.files_collected,
+            errors_count = stats.errors,
+            "Storage complete"
+        );
 
         Ok(stats)
     }
