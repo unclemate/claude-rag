@@ -626,6 +626,34 @@ impl QueryExecutor {
     /// (session, message, file, symbol, commit, diff) and construct an enhanced item
     /// with appropriate Git context and metadata.
     fn get_enhanced_item(&self, id: &str, similarity: f32) -> Result<EnhancedItem> {
+        // Handle chunk IDs (e.g., "file-file:xxx-chunk-35")
+        // Extract the base file ID and retrieve the full file
+        // ID format: "file-{file.id}-chunk-{i}" where file.id = "file:{hash}"
+        // We need to extract "file:{hash}" by removing the "file-" prefix and "-chunk-{i}" suffix
+        if id.contains("-chunk-") {
+            // Remove "file-" prefix to get "{file.id}-chunk-{i}"
+            let without_prefix = id.strip_prefix("file-").unwrap_or(id);
+            // Extract base ID by splitting at "-chunk-"
+            let base_id = without_prefix.split("-chunk-").next().unwrap_or(without_prefix);
+
+            if let Ok(Some(file)) = self.storage.get_file(base_id) {
+                let kind_str = match file.kind {
+                    FileKind::Source => "Source",
+                    FileKind::Docs => "Documentation",
+                    FileKind::Other => "File",
+                };
+                let content = format!("{}: {}", kind_str, file.file_path);
+
+                return Ok(EnhancedItem::new(
+                    id.to_string(),
+                    ContentType::File,
+                    similarity,
+                    file.modified_at.timestamp(),
+                    content,
+                ));
+            }
+        }
+
         // Try session first
         if let Ok(Some(session)) = self.storage.get_session(id) {
             let content = session.title.clone().unwrap_or_else(|| {

@@ -258,32 +258,26 @@ claude-rag query "bug" --after "1w" --before "7d" # 时间范围
 
 ---
 
-### 9. 日志系统完善
-**位置**: 全局配置
+### 9. 日志系统完善 ✅ 已完成
+**位置**: `src/logging.rs`
 
-**当前状态**: 日志系统已实现 (`src/logging.rs`)，但输出需要完善
+**当前状态**: 完整实现基于 tracing-subscriber 的结构化日志系统
 
-**已实现**:
+**已实现功能**:
 - [x] 配置 tracing-subscriber
-- [x] 支持日志级别配置
+- [x] 支持日志级别配置 (Trace/Debug/Info/Warn/Error)
 - [x] 文件日志输出到 `.rag/logs/`
-- [x] 结构化日志 (JSON 格式)
-- [x] 日志轮转
+- [x] 结构化日志 (JSON 格式可选)
+- [x] 每日日志轮转 (可选)
+- [x] 非阻塞写入 (WorkerGuard)
+- [x] RUST_LOG 环境变量支持
+- [x] 源文件位置信息 (文件名:行号)
+- [x] Span 事件追踪 (可选)
+- [x] LoggingOptions 运行时配置
 
-**需要完善**:
-- [ ] 优化日志输出格式和内容
-- [ ] 添加更多关键操作的日志记录
-- [ ] 完善错误日志的上下文信息
-**位置**: 全局配置
-
-**当前状态**: 使用 `eprintln!` 进行错误输出
-
-**需要实现**:
-- [ ] 配置 tracing-subscriber
-- [ ] 支持日志级别配置
-- [ ] 文件日志输出到 `.rag/logs/`
-- [ ] 结构化日志 (JSON 格式)
-- [ ] 添加日志轮转
+**测试覆盖**: 2 个单元测试
+- LogLevel::as_str() 测试
+- LoggingOptions::default() 测试
 
 **设计参考**: `DEVELOPMENT.md` Logging, `Cargo.toml` tracing dependencies
 
@@ -324,7 +318,83 @@ claude-rag query "bug" --after "1w" --before "7d" # 时间范围
 
 ---
 
-### 12. 性能优化
+### 12. 测试代码索引 🆕
+**位置**: 扩展 `src/collector/` 或新增 `src/collector/test.rs`
+
+**当前状态**: 未实现
+
+**目标**: 提高开发效率，通过测试代码理解功能预期行为
+
+**需要实现**:
+- [ ] 识别测试文件 (`tests/`, `*_test.rs`, `*.spec.ts`, `spec/`)
+- [ ] 提取测试函数名和描述
+- [ ] 索引测试断言和预期值
+- [ ] 关联测试到被测试的源代码文件
+- [ ] 支持查询"如何测试 X 功能"
+- [ ] 新增内容类型 `ContentType::Test`
+
+**预期查询示例**:
+```
+"如何测试 database 连接"
+"ProjectDb 的测试用例"
+"HNSW 索引的边界测试"
+```
+
+**设计参考**: 扩展 `DESIGN.md` File Scanner Module
+
+---
+
+### 13. 依赖关系索引 🆕
+**位置**: 扩展 `src/collector/` 或新增 `src/collector/dependency.rs`
+
+**当前状态**: 未实现
+
+**目标**: 快速查询项目依赖的库和版本信息
+
+**需要实现**:
+- [ ] 解析 `Cargo.toml` (dependencies, dev-dependencies)
+- [ ] 解析 `package.json` (dependencies, devDependencies)
+- [ ] 解析 `requirements.txt`, `go.mod` 等
+- [ ] 提取库名、版本号、特性标志
+- [ ] 关联依赖到使用它的代码文件
+- [ ] 支持查询"项目用了哪个 HTTP 客户端"
+- [ ] 新增内容类型 `ContentType::Dependency`
+
+**预期查询示例**:
+```
+"项目用了哪个 HTTP 库"
+"tokio 的版本"
+"哪个测试框架"
+```
+
+**设计参考**: 扩展 `DESIGN.md` File Scanner Module
+
+---
+
+### 14. Git 历史索引功能 💤 备选
+**位置**: 新增模块 `src/git_history.rs` 或扩展 `src/collector/`
+
+**当前状态**: 未实现，优先级降级
+
+**原因分析**:
+- 索引成本高（历史量可能是当前代码的 10-100 倍）
+- 实际使用频率低（~1% 查询涉及历史时间）
+- 已有替代方案（`git log`, `git blame`）
+- 当前 Git 状态同步（Current/Deprecated）已满足时间感知需求
+
+**需要实现**:
+- [ ] Git 提交历史索引 (commit hash, author, date, message)
+- [ ] 提交关联的文件变更 (diffs)
+- [ ] Timeline 构建器集成 - 按时间组织功能演变
+- [ ] 提交时间查询支持 (`--after`, `--before` 扩展到 commit 类型)
+- [ ] Commit ID 作为索引项的元数据
+- [ ] Git 历史与当前代码的关联查询
+
+**设计参考**: `DESIGN.md` Timeline/History queries
+
+---
+
+### 15. 性能优化
 **位置**: 多处
 
 **需要优化**:
@@ -376,14 +446,33 @@ claude-rag query "bug" --after "1w" --before "7d" # 时间范围
 |------|--------|--------|------|
 | 🔴 高优先级 | 0 | 3 | 3 项 ✅ |
 | 🟡 中优先级 | 0 | 4 | 4 项 ✅ |
-| 🟢 低优先级 | 4 | 1 | 5 项 |
-| **合计** | **4** | **8** | **12 项** |
+| 🟢 低优先级 | 5 | 2 | 7 项 |
+| 💤 备选/未来 | 1 | 0 | 1 项 |
+| **合计** | **6** | **9** | **15 项** |
 
-**整体完成度**: 约 98%+ (所有高优先级和中优先级核心功能已完成)
+**整体完成度**: 约 95%+ (所有高优先级和中优先级核心功能已完成)
 
 ---
 
 ## 最近更新
+
+- **2026-01-29**: 🆕 添加测试代码和依赖关系索引功能
+  - 新增第 12 项：测试代码索引（理解功能预期行为）
+  - 新增第 13 项：依赖关系索引（快速查询库使用）
+  - 目标：提高开发效率
+
+- **2026-01-29**: 💤 Git 历史索引功能降为备选
+  - 成本/收益分析：索引成本高，使用频率低
+  - 已有替代方案：git log, git blame
+  - 当前 Git 状态同步已满足时间感知需求
+  - 保留在 TODO.md 作为未来考虑功能
+  - Timeline 功能增强
+
+- **2026-01-29**: ✅ 完成日志系统完善
+  - 完整实现 tracing-subscriber 结构化日志系统
+  - 支持 LogLevel 枚举和 LoggingOptions 运行时配置
+  - 每日日志轮转、非阻塞写入、源文件位置信息
+  - RUST_LOG 环境变量支持
 
 - **2026-01-29**: ✅ 完成进度显示功能
   - 新增 `src/progress/` 模块 (reporter.rs, stats.rs, style.rs)

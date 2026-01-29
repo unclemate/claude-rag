@@ -448,9 +448,21 @@ impl McpServer {
     /// This method uses `block_on()` which should not be called from within
     /// an async context. The MCP server is designed to run in its own runtime.
     fn embed_query_sync(&self, query: &str) -> Result<Vec<f32>> {
-        self.runtime.block_on(async {
-            self.client.embed(query).await
-        })
+        // Check if we're already in a runtime context
+        match tokio::runtime::Handle::try_current() {
+            Ok(handle) => {
+                tokio::task::block_in_place(|| {
+                    handle.block_on(async {
+                        self.client.embed(query).await
+                    })
+                })
+            }
+            Err(_) => {
+                self.runtime.block_on(async {
+                    self.client.embed(query).await
+                })
+            }
+        }
     }
 
     /// Extracts and validates the `query` parameter from tool arguments.
@@ -807,10 +819,6 @@ impl McpServer {
         content_type: Option<ContentType>,
         time_range: crate::query::TimeRange,
     ) -> Result<Value> {
-        // Create a tokio runtime for async execution
-        let runtime = tokio::runtime::Runtime::new()
-            .map_err(|e| RagError::Validation(format!("Failed to create runtime: {}", e)))?;
-
         // Create QueryOptions with time range
         let options = crate::query::QueryOptions {
             query: query.to_string(),
@@ -830,8 +838,21 @@ impl McpServer {
             }
         };
 
-        // Execute the query
-        let result = match runtime.block_on(executor.execute(&options)) {
+        // Execute the query using the server's runtime
+        // Use block_in_place if we're already in a runtime context
+        let result = match tokio::runtime::Handle::try_current() {
+            Ok(handle) => {
+                tokio::task::block_in_place(|| {
+                    handle.block_on(executor.execute(&options))
+                })
+            }
+            Err(_) => {
+                // Not in a runtime, use the server's runtime
+                self.runtime.block_on(executor.execute(&options))
+            }
+        };
+
+        let result = match result {
             Ok(r) => r,
             Err(e) => {
                 return Ok(Self::error_response(format!("Query failed: {}", e)));

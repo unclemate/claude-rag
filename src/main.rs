@@ -3,6 +3,7 @@
 use clap::{Parser, Subcommand};
 use anyhow::Result;
 use tracing::{debug, error, info, warn};
+use std::fs;
 
 // Import the ProgressReporter trait so its methods are available
 use claude_rag::ProgressReporter;
@@ -127,7 +128,7 @@ async fn main() -> Result<()> {
             handle_index(all, project, force, r#type)?;
         }
         Commands::Daemon { daemon_cmd } => {
-            handle_daemon(daemon_cmd)?;
+            handle_daemon(daemon_cmd).await?;
         }
         Commands::Query { query, r#type, top_k, timeline, format, after, before, max_age } => {
             handle_query(query, r#type, top_k, timeline, format, after, before, max_age)?;
@@ -136,9 +137,26 @@ async fn main() -> Result<()> {
             handle_status()?;
         }
         Commands::McpServer => {
-            println!("Starting MCP server...");
-            // TODO: Implement MCP server
-            println!("✓ MCP server started");
+            info!("Starting MCP server");
+
+            // 创建 MCP 服务器实例
+            let server = match claude_rag::mcp::McpServer::new(None) {
+                Ok(server) => server,
+                Err(e) => {
+                    error!("Failed to create MCP server: {}", e);
+                    eprintln!("✗ Failed to create MCP server: {}", e);
+                    std::process::exit(1);
+                }
+            };
+
+            // 运行服务器（监听 stdin/stdout）
+            if let Err(e) = server.run().await {
+                error!("MCP server error: {}", e);
+                eprintln!("✗ MCP server error: {}", e);
+                std::process::exit(1);
+            }
+
+            info!("MCP server shutdown");
         }
         Commands::InstallSkills => {
             handle_install_skills()?;
@@ -261,31 +279,202 @@ fn handle_index(_all: bool, _project: Option<String>, force: bool, r#type: Optio
     Ok(())
 }
 
-fn handle_daemon(daemon_cmd: DaemonCommands) -> Result<()> {
+async fn handle_daemon(daemon_cmd: DaemonCommands) -> Result<()> {
+    use claude_rag::daemon::Daemon;
+    use claude_rag::daemon::DaemonStatus;
+    use std::path::Path;
+
+    let current_dir = std::env::current_dir()
+        .map_err(|e| anyhow::anyhow!("Failed to get current directory: {}", e))?;
+
+    // Load config
+    let config = match claude_rag::ConfigManager::load(Some(&current_dir)) {
+        Ok(config) => config,
+        Err(_e) => {
+            // Try global config
+            match claude_rag::ConfigManager::load(None) {
+                Ok(config) => config,
+                Err(e) => {
+                    error!("Failed to load config: {}", e);
+                    eprintln!("✗ Failed to load config: {}", e);
+                    eprintln!("  Run 'claude-rag init' to create a configuration file");
+                    std::process::exit(1);
+                }
+            }
+        }
+    };
+
     match daemon_cmd {
         DaemonCommands::Start => {
             info!("Starting daemon");
             println!("Starting daemon...");
-            // TODO: Implement daemon start
+
+            // Check if already running
+            let daemon = Daemon::new(config.clone());
+            match daemon.status().await {
+                Ok(DaemonStatus::Running) => {
+                    println!("✗ Daemon is already running");
+                    println!("  Use 'claude-rag daemon status' to check");
+                    std::process::exit(1);
+                }
+                _ => {}
+            }
+
+            // Start daemon
+            let mut daemon = Daemon::new(config);
+            if let Err(e) = daemon.start().await {
+                error!("Failed to start daemon: {}", e);
+                eprintln!("✗ Failed to start daemon: {}", e);
+                std::process::exit(1);
+            }
+
             println!("✓ Daemon started");
+            println!("  Socket: {}", daemon.get_socket_path().display());
+            println!("  PID file: {}", daemon.get_pid_file());
         }
         DaemonCommands::Stop => {
             info!("Stopping daemon");
             println!("Stopping daemon...");
-            // TODO: Implement daemon stop
-            println!("✓ Daemon stopped");
+
+            let daemon = Daemon::new(config.clone());
+            let status = daemon.status().await?;
+
+            match status {
+                DaemonStatus::Running => {
+                    // Read PID and send SIGTERM
+                    let pid_file = daemon.get_pid_file();
+                    if Path::new(pid_file).exists() {
+                        let pid_content = fs::read_to_string(pid_file)
+                            .map_err(|e| anyhow::anyhow!("Failed to read PID file: {}", e))?;
+                        let pid: u32 = pid_content.trim()
+                            .parse()
+                            .map_err(|_| anyhow::anyhow!("Invalid PID in file"))?;
+
+                        // Send SIGTERM using kill command
+                        #[cfg(unix)]
+                        {
+                            use std::process::Command;
+                            let result = Command::new("kill")
+                                .arg("-TERM")
+                                .arg(pid.to_string())
+                                .output();
+
+                            match result {
+                                Ok(output) if output.status.success() => {
+                                    // Wait a bit and cleanup
+                                    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                                    let _ = fs::remove_file(pid_file);
+                                    let socket_path = daemon.get_socket_path();
+                                    if socket_path.exists() {
+                                        let _ = fs::remove_file(&socket_path);
+                                    }
+                                    println!("✓ Daemon stopped");
+                                }
+                                _ => {
+                                    error!("Failed to send SIGTERM to daemon");
+                                    eprintln!("✗ Failed to stop daemon");
+                                    std::process::exit(1);
+                                }
+                            }
+                        }
+
+                        #[cfg(not(unix))]
+                        {
+                            eprintln!("✗ Daemon stop is not supported on this platform");
+                            std::process::exit(1);
+                        }
+                    } else {
+                        eprintln!("✗ PID file not found");
+                        std::process::exit(1);
+                    }
+                }
+                DaemonStatus::Stopped => {
+                    println!("✗ Daemon is not running");
+                    std::process::exit(1);
+                }
+                DaemonStatus::Unknown => {
+                    println!("✗ Daemon status unknown");
+                    std::process::exit(1);
+                }
+            }
         }
         DaemonCommands::Status => {
             debug!("Checking daemon status");
             println!("Daemon status:");
-            // TODO: Implement status check
-            println!("  Status: stopped");
+
+            let daemon = Daemon::new(config);
+            let status = daemon.status().await?;
+
+            match status {
+                DaemonStatus::Running => {
+                    println!("  Status: running");
+                    // Try to get PID
+                    let pid_file = daemon.get_pid_file();
+                    if Path::new(pid_file).exists() {
+                        if let Ok(pid_content) = fs::read_to_string(pid_file) {
+                            println!("  PID: {}", pid_content.trim());
+                        }
+                    }
+                    println!("  Socket: {}", daemon.get_socket_path().display());
+                }
+                DaemonStatus::Stopped => {
+                    println!("  Status: stopped");
+                }
+                DaemonStatus::Unknown => {
+                    println!("  Status: unknown");
+                }
+            }
         }
         DaemonCommands::Restart => {
             info!("Restarting daemon");
             println!("Restarting daemon...");
-            // TODO: Implement restart
+
+            let daemon = Daemon::new(config.clone());
+            let status = daemon.status().await?;
+
+            // Stop if running
+            if matches!(status, DaemonStatus::Running) {
+                println!("  Stopping existing daemon...");
+
+                // Read PID and send SIGTERM
+                let pid_file = daemon.get_pid_file();
+                if Path::new(pid_file).exists() {
+                    let pid_content = fs::read_to_string(pid_file)
+                        .map_err(|e| anyhow::anyhow!("Failed to read PID file: {}", e))?;
+                    let pid: u32 = pid_content.trim()
+                        .parse()
+                        .map_err(|_| anyhow::anyhow!("Invalid PID in file"))?;
+
+                    #[cfg(unix)]
+                    {
+                        use std::process::Command;
+                        let _ = Command::new("kill")
+                            .arg("-TERM")
+                            .arg(pid.to_string())
+                            .output();
+                    }
+
+                    // Wait for cleanup
+                    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                    let _ = fs::remove_file(pid_file);
+                    let socket_path = daemon.get_socket_path();
+                    if socket_path.exists() {
+                        let _ = fs::remove_file(&socket_path);
+                    }
+                }
+            }
+
+            // Start new daemon
+            println!("  Starting new daemon...");
+            let mut daemon = Daemon::new(config);
+            if let Err(e) = daemon.start().await {
+                error!("Failed to start daemon: {}", e);
+                eprintln!("✗ Failed to start daemon: {}", e);
+                std::process::exit(1);
+            }
+
             println!("✓ Daemon restarted");
+            println!("  Socket: {}", daemon.get_socket_path().display());
         }
     }
     Ok(())
@@ -320,15 +509,31 @@ fn handle_query(
     info!("Executing query: {}", query);
 
     // Use tokio runtime for async query execution
-    let runtime = tokio::runtime::Runtime::new()?;
-    let result = runtime.block_on(claude_rag::execute_query_with_time_range(
-        query,
-        r#type,
-        top_k,
-        timeline,
-        format,
-        time_range,
-    ))?;
+    // Try to use existing runtime, or create a new one if needed
+    let result = if let Ok(handle) = tokio::runtime::Handle::try_current() {
+        // Use existing runtime
+        tokio::task::block_in_place(|| {
+            handle.block_on(claude_rag::execute_query_with_time_range(
+                query,
+                r#type,
+                top_k,
+                timeline,
+                format,
+                time_range,
+            ))
+        })
+    } else {
+        // Create new runtime
+        let runtime = tokio::runtime::Runtime::new()?;
+        runtime.block_on(claude_rag::execute_query_with_time_range(
+            query,
+            r#type,
+            top_k,
+            timeline,
+            format,
+            time_range,
+        ))
+    }?;
 
     info!("Query executed successfully");
     println!("{}", result);

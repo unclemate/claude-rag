@@ -368,7 +368,7 @@ impl FileCollector {
     ) -> Result<CollectionStats> {
         use crate::progress::ProgressEvent;
 
-        let stats = CollectionStats {
+        let mut stats = CollectionStats {
             files_scanned: files.len(),
             ..Default::default()
         };
@@ -389,12 +389,14 @@ impl FileCollector {
 
             match storage.store_file(file) {
                 Ok(_) => {
+                    stats.files_collected += 1;
                     reporter.report(ProgressEvent::ItemCompleted {
                         name: file.file_path.clone(),
                         success: true,
                     });
                 }
                 Err(e) => {
+                    stats.errors += 1;
                     warn!(
                         file_path = %file.file_path,
                         error = %e,

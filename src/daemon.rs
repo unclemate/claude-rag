@@ -225,13 +225,12 @@ impl Daemon {
     }
 
     /// Get the socket path from config or default.
-    #[allow(dead_code)]
-    fn get_socket_path(&self) -> &Path {
+    pub fn get_socket_path(&self) -> &Path {
         &self.socket_path
     }
 
     /// Get the PID file path from config or default.
-    fn get_pid_file(&self) -> &str {
+    pub fn get_pid_file(&self) -> &str {
         match &self.config.daemon.pid_file {
             Some(path) if !path.is_empty() => path.as_str(),
             _ => DEFAULT_PID_FILE,

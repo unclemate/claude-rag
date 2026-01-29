@@ -249,7 +249,7 @@ impl SessionCollector {
     ) -> Result<SessionCollectionStats> {
         use crate::progress::ProgressEvent;
 
-        let stats = SessionCollectionStats {
+        let mut stats = SessionCollectionStats {
             sessions_scanned: sessions.len(),
             ..Default::default()
         };
@@ -271,12 +271,15 @@ impl SessionCollector {
             // Store session
             match storage.store_session(&parsed.session) {
                 Ok(_) => {
+                    stats.sessions_collected += 1;
+                    stats.messages_collected += parsed.messages.len();
                     reporter.report(ProgressEvent::ItemCompleted {
                         name: parsed.session.id.clone(),
                         success: true,
                     });
                 }
                 Err(e) => {
+                    stats.errors += 1;
                     warn!(
                         session_id = %parsed.session.id,
                         error = %e,
@@ -300,6 +303,7 @@ impl SessionCollector {
                         // Message storage success
                     }
                     Err(e) => {
+                        stats.errors += 1;
                         warn!(
                             message_id = %message.id,
                             error = %e,
