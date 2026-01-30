@@ -15,8 +15,10 @@ pub struct SessionCollectionStats {
     pub sessions_scanned: usize,
     /// Number of sessions collected
     pub sessions_collected: usize,
-    /// Number of messages collected
-    pub messages_collected: usize,
+    /// Number of messages stored to database
+    pub messages_stored: usize,
+    /// Number of message chunks indexed to vector store
+    pub message_chunks_indexed: usize,
     /// Number of errors
     pub errors: usize,
 }
@@ -137,9 +139,9 @@ impl SessionCollector {
                     .and_then(|s| DateTime::parse_from_rfc3339(&s).ok())
                     .map(|dt| dt.with_timezone(&Utc));
 
-                // Get session directory path
-                let session_dir = self.get_session_dir(session_id)?;
-                if self.parser.needs_indexing(&session_dir, indexed_time)? {
+                // Get session file path
+                let session_file = self.get_session_file(session_id)?;
+                if self.parser.needs_indexing(&session_file, indexed_time)? {
                     debug!("Session {} needs indexing (modified)", session_id);
                     needs_indexing.push(parsed);
                 }
@@ -157,20 +159,16 @@ impl SessionCollector {
         Ok(needs_indexing)
     }
 
-    /// Get the session directory for a session ID.
-    fn get_session_dir(&self, session_id: &str) -> Result<PathBuf> {
+    /// Get the session file path for a session ID (new format).
+    fn get_session_file(&self, session_id: &str) -> Result<PathBuf> {
         let projects = self.parser.scan_claude_projects()?;
 
-        // Find the session directory
-        for session_dir in projects.values() {
-            if let Some(dir_name) = session_dir.file_name() {
-                if dir_name.to_string_lossy() == session_id {
-                    return Ok(session_dir.clone());
-                }
-            }
+        // Find the session file
+        if let Some(path) = projects.get(session_id) {
+            return Ok(path.clone());
         }
 
-        Err(RagError::NotFound(format!("Session directory for {}", session_id)))
+        Err(RagError::NotFound(format!("Session file for {}", session_id)))
     }
 
     /// Store collected sessions to storage.
@@ -212,7 +210,7 @@ impl SessionCollector {
             for message in &parsed.messages {
                 match storage.store_message(message) {
                     Ok(_) => {
-                        stats.messages_collected += 1;
+                        stats.messages_stored += 1;
                     }
                     Err(e) => {
                         warn!(
@@ -272,7 +270,7 @@ impl SessionCollector {
             match storage.store_session(&parsed.session) {
                 Ok(_) => {
                     stats.sessions_collected += 1;
-                    stats.messages_collected += parsed.messages.len();
+                    stats.messages_stored += parsed.messages.len();
                     reporter.report(ProgressEvent::ItemCompleted {
                         name: parsed.session.id.clone(),
                         success: true,
@@ -337,12 +335,12 @@ impl SessionCollector {
     /// # Returns
     /// * `Option<ParsedSession>` - Parsed session if found
     pub fn parse_session_by_id(&self, session_id: &str) -> Result<Option<ParsedSession>> {
-        let session_dir = match self.get_session_dir(session_id) {
-            Ok(dir) => dir,
+        let session_file = match self.get_session_file(session_id) {
+            Ok(file) => file,
             Err(RagError::NotFound(_)) => return Ok(None),
             Err(e) => return Err(e),
         };
-        match self.parser.parse_session(&session_dir) {
+        match self.parser.parse_session(&session_file) {
             Ok(session) => Ok(Some(session)),
             Err(RagError::NotFound(_)) => Ok(None),
             Err(e) => Err(e),
@@ -359,37 +357,57 @@ impl Default for SessionCollector {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs::{self, File as StdFile};
-    use std::io::Write;
+    use std::fs;
     use tempfile::TempDir;
 
-    /// Create a test session directory
-    fn create_test_session(dir: &Path, session_id: &str, content: &str) -> PathBuf {
-        let session_dir = dir.join(session_id);
-        fs::create_dir_all(&session_dir).unwrap();
-        let index_path = session_dir.join("index.jsonl");
-        let mut file = StdFile::create(&index_path).unwrap();
-        file.write_all(content.as_bytes()).unwrap();
-        session_dir
+    /// Create a test session file in new format
+    fn create_test_session_new_format(dir: &Path, session_id: &str, content: &str, title: &str) {
+        let session_file = dir.join(format!("{}.jsonl", session_id));
+        fs::write(&session_file, content).unwrap();
+
+        // Create or update sessions-index.json
+        let index_path = dir.join("sessions-index.json");
+        let index_content = if index_path.exists() {
+            let existing = fs::read_to_string(&index_path).unwrap();
+            let mut json: serde_json::Value = serde_json::from_str(&existing).unwrap();
+            if let Some(entries) = json["entries"].as_array_mut() {
+                entries.push(serde_json::json!({
+                    "sessionId": session_id,
+                    "summary": title,
+                    "projectPath": "/test/project",
+                    "created": "2024-01-01T00:00:00Z"
+                }));
+            }
+            serde_json::to_string_pretty(&json).unwrap()
+        } else {
+            serde_json::json!({
+                "entries": [{
+                    "sessionId": session_id,
+                    "summary": title,
+                    "projectPath": "/test/project",
+                    "created": "2024-01-01T00:00:00Z"
+                }]
+            }).to_string()
+        };
+        fs::write(&index_path, index_content).unwrap();
     }
 
-    /// Create a mock Claude sessions directory structure
-    fn create_mock_sessions(temp: &Path) {
-        let sessions_dir = temp.join("sessions");
-        fs::create_dir_all(&sessions_dir).unwrap();
+    /// Create a mock Claude projects directory structure (new format)
+    fn create_mock_projects(temp: &Path) {
+        let projects_dir = temp.join("projects");
+        let project_dir = projects_dir.join("test-project");
+        fs::create_dir_all(&project_dir).unwrap();
 
         // Session 1
-        let content1 = r#"{"title":"Test Session 1","projectPath":"/test/project1","createdAt":"2024-01-01T00:00:00Z"}
-{"role":"user","content":"Hello","timestamp":"2024-01-01T00:00:00Z"}
-{"role":"assistant","content":"Hi there","timestamp":"2024-01-01T00:00:01Z","model":"claude-3"}"#;
-        create_test_session(&sessions_dir, "session-1", content1);
+        let content1 = r#"{"type":"user","timestamp":"2024-01-01T00:00:00Z","uuid":"msg-1","sessionId":"session-1","message":{"role":"user","content":"Hello","tokens":10}}
+{"type":"assistant","timestamp":"2024-01-01T00:00:01Z","uuid":"msg-2","sessionId":"session-1","message":{"role":"assistant","content":"Hi there","model":"claude-3","tokens":20}}"#;
+        create_test_session_new_format(&project_dir, "session-1", content1, "Test Session 1");
 
         // Session 2
-        let content2 = r#"{"title":"Test Session 2","projectPath":"/test/project2","createdAt":"2024-01-02T00:00:00Z"}
-{"role":"user","content":"How do I","timestamp":"2024-01-02T00:00:00Z"}
-{"role":"assistant","content":"To do that","timestamp":"2024-01-02T00:00:01Z","model":"claude-3"}
-{"role":"user","content":"Thanks","timestamp":"2024-01-02T00:00:02Z"}"#;
-        create_test_session(&sessions_dir, "session-2", content2);
+        let content2 = r#"{"type":"user","timestamp":"2024-01-02T00:00:00Z","uuid":"msg-3","sessionId":"session-2","message":{"role":"user","content":"How do I","tokens":10}}
+{"type":"assistant","timestamp":"2024-01-02T00:00:01Z","uuid":"msg-4","sessionId":"session-2","message":{"role":"assistant","content":"To do that","model":"claude-3","tokens":20}}
+{"type":"user","timestamp":"2024-01-02T00:00:02Z","uuid":"msg-5","sessionId":"session-2","message":{"role":"user","content":"Thanks","tokens":5}}"#;
+        create_test_session_new_format(&project_dir, "session-2", content2, "Test Session 2");
     }
 
     #[test]
@@ -414,11 +432,12 @@ mod tests {
     #[test]
     fn test_scan_claude_projects() {
         let temp = TempDir::new().unwrap();
-        create_mock_sessions(temp.path());
+        create_mock_projects(temp.path());
 
         let collector = SessionCollector::new(Some(temp.path().to_path_buf()));
         let projects = collector.scan_projects().unwrap();
 
+        // scan_projects returns session IDs in new format
         assert_eq!(projects.len(), 2);
     }
 
@@ -435,7 +454,7 @@ mod tests {
     #[test]
     fn test_collect_sessions() {
         let temp = TempDir::new().unwrap();
-        create_mock_sessions(temp.path());
+        create_mock_projects(temp.path());
 
         let collector = SessionCollector::new(Some(temp.path().to_path_buf()));
         let sessions = collector.collect_sessions().unwrap();
@@ -458,7 +477,7 @@ mod tests {
     #[test]
     fn test_collect_sessions_message_content() {
         let temp = TempDir::new().unwrap();
-        create_mock_sessions(temp.path());
+        create_mock_projects(temp.path());
 
         let collector = SessionCollector::new(Some(temp.path().to_path_buf()));
         let sessions = collector.collect_sessions().unwrap();
@@ -477,7 +496,7 @@ mod tests {
     #[test]
     fn test_storage_integration() {
         let temp = TempDir::new().unwrap();
-        create_mock_sessions(temp.path());
+        create_mock_projects(temp.path());
 
         let collector = SessionCollector::new(Some(temp.path().to_path_buf()));
         let storage = StorageManager::open_project_db(temp.path()).unwrap();
@@ -487,7 +506,7 @@ mod tests {
 
         assert_eq!(stats.sessions_scanned, 2);
         assert_eq!(stats.sessions_collected, 2);
-        assert_eq!(stats.messages_collected, 5); // 2 + 3 messages
+        assert_eq!(stats.messages_stored, 5); // 2 + 3 messages
         assert_eq!(stats.errors, 0);
 
         // Verify sessions were stored
@@ -501,7 +520,7 @@ mod tests {
     #[test]
     fn test_collect_incremental_new_sessions() {
         let temp = TempDir::new().unwrap();
-        create_mock_sessions(temp.path());
+        create_mock_projects(temp.path());
 
         let collector = SessionCollector::new(Some(temp.path().to_path_buf()));
         let storage = StorageManager::open_project_db(temp.path()).unwrap();
@@ -515,7 +534,7 @@ mod tests {
     #[test]
     fn test_collect_incremental_no_changes() {
         let temp = TempDir::new().unwrap();
-        create_mock_sessions(temp.path());
+        create_mock_projects(temp.path());
 
         let collector = SessionCollector::new(Some(temp.path().to_path_buf()));
         let storage = StorageManager::open_project_db(temp.path()).unwrap();
@@ -533,7 +552,7 @@ mod tests {
     #[test]
     fn test_parse_session_by_id() {
         let temp = TempDir::new().unwrap();
-        create_mock_sessions(temp.path());
+        create_mock_projects(temp.path());
 
         let collector = SessionCollector::new(Some(temp.path().to_path_buf()));
 
@@ -546,7 +565,7 @@ mod tests {
     #[test]
     fn test_parse_session_by_id_not_found() {
         let temp = TempDir::new().unwrap();
-        create_mock_sessions(temp.path());
+        create_mock_projects(temp.path());
 
         let collector = SessionCollector::new(Some(temp.path().to_path_buf()));
 
@@ -559,17 +578,18 @@ mod tests {
     fn test_collect_from_specific_project() {
         let temp = TempDir::new().unwrap();
 
-        // Create a project with sessions
-        let project_dir = temp.path().join("test-project");
-        let sessions_dir = project_dir.join(".claude/sessions");
-        fs::create_dir_all(&sessions_dir).unwrap();
+        // Create a project with sessions (new format)
+        let projects_dir = temp.path().join("projects");
+        let project_path = temp.path().join("test-project");
+        let encoded_path = crate::parser::SessionParser::encode_project_path(&project_path);
+        let project_dir = projects_dir.join(&encoded_path);
+        fs::create_dir_all(&project_dir).unwrap();
 
-        let content = r#"{"title":"Project Session","projectPath":"/test-project","createdAt":"2024-01-01T00:00:00Z"}
-{"role":"user","content":"Project message","timestamp":"2024-01-01T00:00:00Z"}"#;
-        create_test_session(&sessions_dir, "proj-session-1", content);
+        let content = r#"{"type":"user","timestamp":"2024-01-01T00:00:00Z","uuid":"msg-1","sessionId":"proj-session-1","message":{"role":"user","content":"Project message","tokens":10}}"#;
+        create_test_session_new_format(&project_dir, "proj-session-1", content, "Project Session");
 
-        // Collect from specific project
-        let collector = SessionCollector::new(None).with_project(&project_dir);
+        // Collect from specific project using temp as config_dir
+        let collector = SessionCollector::new(Some(temp.path().to_path_buf())).with_project(&project_path);
         let sessions = collector.collect_sessions().unwrap();
 
         assert_eq!(sessions.len(), 1);

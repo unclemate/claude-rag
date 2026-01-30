@@ -620,37 +620,66 @@ impl QueryExecutor {
         Ok(enhanced)
     }
 
+    /// Parse a message chunk ID to extract the base message UUID.
+    ///
+    /// Expected format: "message:{uuid}-chunk-{i}"
+    /// Returns the UUID part without the "message:" prefix.
+    fn parse_message_chunk_id(id: &str) -> Option<&str> {
+        // Check for "message:" prefix
+        let without_prefix = id.strip_prefix("message:")?;
+        // Split at "-chunk-" and return the UUID part
+        let uuid_part = without_prefix.split("-chunk-").next()?;
+        // Validate that we have a non-empty UUID
+        if uuid_part.is_empty() {
+            None
+        } else {
+            Some(uuid_part)
+        }
+    }
+
     /// Get enhanced item from storage by ID.
     ///
     /// Attempts to retrieve the item from different storage types
     /// (session, message, file, symbol, commit, diff) and construct an enhanced item
     /// with appropriate Git context and metadata.
     fn get_enhanced_item(&self, id: &str, similarity: f32) -> Result<EnhancedItem> {
-        // Handle chunk IDs (e.g., "file-file:xxx-chunk-35")
-        // Extract the base file ID and retrieve the full file
-        // ID format: "file-{file.id}-chunk-{i}" where file.id = "file:{hash}"
-        // We need to extract "file:{hash}" by removing the "file-" prefix and "-chunk-{i}" suffix
+        // Handle chunk IDs (e.g., "file-file:xxx-chunk-35" or "message:xxx-chunk-0")
+        // Extract the base ID and retrieve the full item
         if id.contains("-chunk-") {
-            // Remove "file-" prefix to get "{file.id}-chunk-{i}"
-            let without_prefix = id.strip_prefix("file-").unwrap_or(id);
-            // Extract base ID by splitting at "-chunk-"
-            let base_id = without_prefix.split("-chunk-").next().unwrap_or(without_prefix);
+            // Handle file chunks: "file-{file.id}-chunk-{i}"
+            if let Some(without_prefix) = id.strip_prefix("file-") {
+                let base_id = without_prefix.split("-chunk-").next().unwrap_or(without_prefix);
 
-            if let Ok(Some(file)) = self.storage.get_file(base_id) {
-                let kind_str = match file.kind {
-                    FileKind::Source => "Source",
-                    FileKind::Docs => "Documentation",
-                    FileKind::Other => "File",
-                };
-                let content = format!("{}: {}", kind_str, file.file_path);
+                if let Ok(Some(file)) = self.storage.get_file(base_id) {
+                    let kind_str = match file.kind {
+                        FileKind::Source => "Source",
+                        FileKind::Docs => "Documentation",
+                        FileKind::Other => "File",
+                    };
+                    let content = format!("{}: {}", kind_str, file.file_path);
 
-                return Ok(EnhancedItem::new(
-                    id.to_string(),
-                    ContentType::File,
-                    similarity,
-                    file.modified_at.timestamp(),
-                    content,
-                ));
+                    return Ok(EnhancedItem::new(
+                        id.to_string(),
+                        ContentType::File,
+                        similarity,
+                        file.modified_at.timestamp(),
+                        content,
+                    ));
+                }
+            }
+
+            // Handle message chunks: "message:{uuid}-chunk-{i}"
+            if let Some(uuid_part) = Self::parse_message_chunk_id(id) {
+                // get_message expects the UUID without the "message:" prefix (it adds it internally)
+                if let Ok(Some(message)) = self.storage.get_message(uuid_part) {
+                    return Ok(EnhancedItem::new(
+                        id.to_string(),
+                        ContentType::Message,
+                        similarity,
+                        message.timestamp.timestamp(),
+                        message.content,
+                    ));
+                }
             }
         }
 
@@ -669,7 +698,7 @@ impl QueryExecutor {
             ));
         }
 
-        // Try message
+        // Try message (for non-chunked messages)
         if let Ok(Some(message)) = self.storage.get_message(id) {
             return Ok(EnhancedItem::new(
                 id.to_string(),

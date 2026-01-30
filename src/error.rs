@@ -50,6 +50,10 @@ pub enum RagError {
     /// Validation error.
     #[error("Validation error: {0}")]
     Validation(String),
+
+    /// Unsupported format/version.
+    #[error("Unsupported: {0}")]
+    Unsupported(String),
 }
 
 /// Result type alias for RagError.

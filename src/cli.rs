@@ -301,6 +301,50 @@ pub fn index_project(
             collector.collect_incremental(&storage)?
         };
 
+        // Collect messages for vector indexing
+        let mut message_items: Vec<(String, String, ContentType)> = Vec::new();
+        for parsed in &sessions {
+            for message in &parsed.messages {
+                let id = format!("message:{}", message.id);
+                message_items.push((id, message.content.clone(), ContentType::Message));
+            }
+        }
+
+        // Batch index messages to HNSW
+        if indexing_enabled && !message_items.is_empty() {
+            match tokio::runtime::Handle::try_current() {
+                Ok(handle) => {
+                    tokio::task::block_in_place(|| {
+                        handle.block_on(async {
+                            match indexer.index_batch(message_items, &mut hnsw_index).await {
+                                Ok(index_stats) => {
+                                    session_stats.message_chunks_indexed = index_stats.embeddings_generated;
+                                }
+                                Err(e) => {
+                                    tracing::error!("Message vector indexing failed: {}", e);
+                                    errors += 1;
+                                }
+                            }
+                        })
+                    });
+                }
+                Err(_) => {
+                    let rt = tokio::runtime::Runtime::new()?;
+                    rt.block_on(async {
+                        match indexer.index_batch(message_items, &mut hnsw_index).await {
+                            Ok(index_stats) => {
+                                session_stats.message_chunks_indexed = index_stats.embeddings_generated;
+                            }
+                            Err(e) => {
+                                tracing::error!("Message vector indexing failed: {}", e);
+                                errors += 1;
+                            }
+                        }
+                    });
+                }
+            }
+        }
+
         // Store sessions with progress if reporter provided, otherwise use simple method
         if let Some(reporter) = progress {
             session_stats = collector.store_sessions_with_progress(&sessions, &storage, reporter)?;

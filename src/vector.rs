@@ -62,38 +62,46 @@ impl VectorBuilder {
 
         // Split long content into chunks at sentence boundaries
         let mut chunks = Vec::new();
-        let mut current_chunk = String::new();
+        let chars: Vec<char> = content.chars().collect();
+        let mut chunk_start = 0;
         let mut last_sentence_end = 0;
 
-        for (i, c) in content.char_indices() {
-            current_chunk.push(c);
-
+        for (i, &c) in chars.iter().enumerate() {
             // Track sentence endings
             if c == '.' || c == '!' || c == '?' {
                 // Check if followed by space or end of string
-                let next_is_boundary = content[i + c.len_utf8()..].starts_with(' ')
-                    || i + c.len_utf8() == content.len();
-
-                if next_is_boundary {
-                    last_sentence_end = current_chunk.len();
+                let next_is_space = chars.get(i + 1).map_or(true, |&next| next == ' ');
+                if next_is_space {
+                    last_sentence_end = i + 1;
                 }
             }
 
             // When approaching max size, try to split at last sentence
-            if current_chunk.len() >= MAX_CHUNK_SIZE && last_sentence_end > 0 {
+            if i - chunk_start >= MAX_CHUNK_SIZE && last_sentence_end > chunk_start {
                 let split_point = last_sentence_end;
-                chunks.push(current_chunk[..split_point].trim().to_string());
+
+                // Collect chars for this chunk (more efficient than collect on iterators)
+                let mut chunk = String::with_capacity(split_point - chunk_start);
+                for &ch in &chars[chunk_start..split_point] {
+                    chunk.push(ch);
+                }
+                chunks.push(chunk.trim().to_string());
 
                 // Start new chunk with overlap
-                let overlap_start = split_point.saturating_sub(CHUNK_OVERLAP);
-                current_chunk = current_chunk[overlap_start..].to_string();
+                chunk_start = split_point.saturating_sub(CHUNK_OVERLAP);
                 last_sentence_end = 0;
             }
         }
 
         // Add remaining content
-        if !current_chunk.trim().is_empty() {
-            chunks.push(current_chunk.trim().to_string());
+        if chunk_start < chars.len() {
+            let mut chunk = String::with_capacity(chars.len() - chunk_start);
+            for &ch in &chars[chunk_start..] {
+                chunk.push(ch);
+            }
+            if !chunk.trim().is_empty() {
+                chunks.push(chunk.trim().to_string());
+            }
         }
 
         Ok(chunks)
