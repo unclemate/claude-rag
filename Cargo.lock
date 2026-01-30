@@ -291,6 +291,7 @@ dependencies = [
  "lru",
  "notify",
  "proptest",
+ "regex",
  "reqwest",
  "serde",
  "serde_json",

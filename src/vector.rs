@@ -41,6 +41,7 @@ impl VectorBuilder {
             ContentType::Symbol => self.chunk_symbol(content),
             ContentType::Commit => self.chunk_commit(content),
             ContentType::GitDiff => self.chunk_diff(content),
+            ContentType::Plan => self.chunk_file(content),
         }
     }
 

@@ -53,6 +53,10 @@ impl ConfidenceScore {
                 // Git commits have high confidence
                 ConfidenceLevel::High
             }
+            ContentType::Plan => {
+                // Plans have high confidence (design documents)
+                ConfidenceLevel::High
+            }
             ContentType::Message | ContentType::Session => {
                 // Sessions decay over time
                 if age_days <= 7 {
@@ -107,6 +111,10 @@ impl ConfidenceScore {
             }
             ContentType::Commit | ContentType::GitDiff => {
                 // Git commits have high confidence
+                ConfidenceLevel::High
+            }
+            ContentType::Plan => {
+                // Plans have high confidence (design documents)
                 ConfidenceLevel::High
             }
             ContentType::Message | ContentType::Session => {

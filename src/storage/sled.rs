@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use tracing::info;
 
 use crate::error::{Result, RagError};
-use crate::models::{Commit, File, GitDiff, Message, Session, Symbol};
+use crate::models::{Commit, File, GitDiff, Message, Plan, Session, Symbol};
 use crate::storage::HnswIndex;
 
 /// Storage manager for project data.
@@ -241,6 +241,59 @@ impl StorageManager {
         } else {
             Ok(None)
         }
+    }
+
+    /// Store a plan.
+    pub fn store_plan(&self, plan: &Plan) -> Result<()> {
+        let key = format!("plan:{}", plan.id);
+        let value = serde_json::to_vec(plan)?;
+        self.db.insert(key, value)?;
+        Ok(())
+    }
+
+    /// Retrieve a plan.
+    pub fn get_plan(&self, id: &str) -> Result<Option<Plan>> {
+        let key = format!("plan:{}", id);
+        if let Some(value) = self.db.get(key)? {
+            let plan = serde_json::from_slice(&value)?;
+            Ok(Some(plan))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Get all plans from storage.
+    pub fn get_all_plans(&self) -> Result<Vec<Plan>> {
+        let mut plans = Vec::new();
+        let prefix = "plan:";
+
+        for item in self.db.scan_prefix(prefix) {
+            let (_key, value) = item.map_err(RagError::Sled)?;
+            if let Ok(plan) = serde_json::from_slice::<Plan>(&value) {
+                plans.push(plan);
+            }
+        }
+
+        Ok(plans)
+    }
+
+    /// Iterate over all plans with a callback function.
+    ///
+    /// This is memory-efficient for large datasets as it doesn't load all items at once.
+    pub fn iter_plans<F>(&self, mut callback: F) -> Result<()>
+    where
+        F: FnMut(Plan) -> Result<()>,
+    {
+        let prefix = "plan:";
+
+        for item in self.db.scan_prefix(prefix) {
+            let (_key, value) = item.map_err(RagError::Sled)?;
+            if let Ok(plan) = serde_json::from_slice::<Plan>(&value) {
+                callback(plan)?;
+            }
+        }
+
+        Ok(())
     }
 
     // ==================== Auxiliary Index Operations ====================

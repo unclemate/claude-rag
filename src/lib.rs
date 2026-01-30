@@ -26,6 +26,7 @@ pub mod hook;
 pub mod indexer;
 pub mod logging;
 pub mod mcp;
+pub mod plan_parser;
 pub mod results;
 pub mod parser;
 pub mod query;

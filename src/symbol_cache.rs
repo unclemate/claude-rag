@@ -1,30 +1,30 @@
-//! 符号缓存系统
+//! Symbol cache system
 //!
-//! 实现三级缓存架构，用于加速符号检索：
+//! Implements a three-tier cache architecture for accelerating symbol retrieval:
 //!
-//! ## 缓存层级
+//! ## Cache Tiers
 //!
-//! - **L1 缓存**: 内存中的热数据，最快但容量最小（~100 项）
-//! - **L2 缓存**: 符号级缓存，中等速度和容量（~1000 项）
-//! - **L3 缓存**: 文件级缓存，最慢但容量最大（按需加载）
+//! - **L1 Cache**: Hot data in memory, fastest but smallest capacity (~100 items)
+//! - **L2 Cache**: Symbol-level cache, medium speed and capacity (~1000 items)
+//! - **L3 Cache**: File-level cache, slowest but largest capacity (on-demand loading)
 //!
-//! ## 缓存策略
+//! ## Cache Strategies
 //!
-//! - **LRU 淘汰**: 各层级使用 LRU 策略淘汰最少使用的项
-//! - **分支隔离**: 不同分支的缓存完全隔离
-//! - **一致性保证**: 符号更新时自动失效相关缓存
+//! - **LRU Eviction**: Each tier uses LRU strategy to evict least recently used items
+//! - **Branch Isolation**: Caches for different branches are completely isolated
+//! - **Consistency Guarantee**: Symbol updates automatically invalidate related caches
 //!
-//! ## 示例
+//! ## Example
 //!
 //! ```ignore
 //! use crate::symbol_cache::SymbolCache;
 //!
 //! let cache = SymbolCache::new();
 //!
-//! // 存储符号
+//! // Store symbol
 //! cache.put(symbol, "main")?;
 //!
-//! // 获取符号
+//! // Get symbol
 //! if let Some(symbol) = cache.get("symbol:abc123", "main")? {
 //!     println!("Found: {}", symbol.name);
 //! }
@@ -39,23 +39,23 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{debug, trace};
 
-/// L1 缓存容量（内存中的热数据）
+/// L1 cache capacity (hot data in memory)
 const L1_CAPACITY: usize = 100;
 
-/// L2 缓存容量（符号级缓存）
+/// L2 cache capacity (symbol-level cache)
 const L2_CAPACITY: usize = 1000;
 
-/// L3 缓存目录名称
+/// L3 cache directory name
 const L3_CACHE_DIR: &str = "symbol_cache";
 
-/// 缓存条目
+/// Cache entry
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct CacheEntry {
-    /// 符号数据
+    /// Symbol data
     symbol: Symbol,
-    /// 访问时间戳（用于 LRU）
+    /// Access timestamp (for LRU)
     last_access: chrono::DateTime<chrono::Utc>,
-    /// 缓存键（用于验证）
+    /// Cache key (for validation)
     key: String,
 }
 
@@ -81,19 +81,19 @@ impl Default for CacheEntry {
     }
 }
 
-/// L1 缓存 - 内存中的热数据
+/// L1 cache - hot data in memory
 ///
-/// 最快的缓存层级，存储最常用的符号。
+/// Fastest cache tier, storing most frequently used symbols.
 #[derive(Debug)]
 struct L1Cache {
-    /// 缓存条目
+    /// Cache entries
     entries: Arc<RwLock<HashMap<String, CacheEntry>>>,
-    /// LRU 访问顺序（用于淘汰）
+    /// LRU access order (for eviction)
     access_order: Arc<RwLock<Vec<String>>>,
 }
 
 impl L1Cache {
-    /// 创建新的 L1 缓存
+    /// Create new L1 cache
     fn new() -> Self {
         Self {
             entries: Arc::new(RwLock::new(HashMap::new())),
@@ -101,25 +101,25 @@ impl L1Cache {
         }
     }
 
-    /// 获取缓存条目
+    /// Get cache entry
     async fn get(&self, key: &str) -> Option<Symbol> {
         let mut entries = self.entries.write().await;
         let mut order = self.access_order.write().await;
 
         if let Some(entry) = entries.get(key) {
-            // 先克隆符号（在修改 entry 之前）
+            // Clone symbol first (before modifying entry)
             let symbol = entry.symbol.clone();
 
-            // 更新访问时间和 LRU 顺序
+            // Update access time and LRU order
             let mut updated = entry.clone();
             updated.last_access = chrono::Utc::now();
 
-            // 更新 LRU 顺序
+            // Update LRU order
             order.retain(|k| k != key);
             let key_clone = key.to_string();
             order.push(key_clone.clone());
 
-            // 直接插入（key 已存在，所以 insert 只是更新）
+            // Insert directly (key exists, so insert just updates)
             entries.insert(key_clone, updated);
 
             trace!(key = %key, cache = "L1", "Cache hit");
@@ -130,12 +130,12 @@ impl L1Cache {
         }
     }
 
-    /// 存储缓存条目
+    /// Store cache entry
     async fn put(&self, key: String, symbol: Symbol) {
         let mut entries = self.entries.write().await;
         let mut order = self.access_order.write().await;
 
-        // 检查容量，必要时淘汰
+        // Check capacity, evict if necessary
         while entries.len() >= L1_CAPACITY {
             if let Some(old_key) = order.first() {
                 let old_key = old_key.clone();
@@ -159,7 +159,7 @@ impl L1Cache {
         trace!(key = %key, cache = "L1", "Cached");
     }
 
-    /// 清空缓存
+    /// Clear cache
     async fn clear(&self) {
         let mut entries = self.entries.write().await;
         let mut order = self.access_order.write().await;
@@ -170,7 +170,7 @@ impl L1Cache {
         debug!(cache = "L1", "Cache cleared");
     }
 
-    /// 失效指定键
+    /// Invalidate specific key
     async fn invalidate(&self, key: &str) {
         let mut entries = self.entries.write().await;
         let mut order = self.access_order.write().await;
@@ -182,19 +182,19 @@ impl L1Cache {
     }
 }
 
-/// L2 缓存 - 符号级缓存
+/// L2 cache - symbol-level cache
 ///
-/// 中等大小的缓存，存储更多符号数据。
+/// Medium-sized cache, storing more symbol data.
 #[derive(Debug)]
 struct L2Cache {
-    /// 缓存条目
+    /// Cache entries
     entries: Arc<RwLock<HashMap<String, CacheEntry>>>,
-    /// LRU 访问顺序
+    /// LRU access order
     access_order: Arc<RwLock<Vec<String>>>,
 }
 
 impl L2Cache {
-    /// 创建新的 L2 缓存
+    /// Create new L2 cache
     fn new() -> Self {
         Self {
             entries: Arc::new(RwLock::new(HashMap::new())),
@@ -202,25 +202,25 @@ impl L2Cache {
         }
     }
 
-    /// 获取缓存条目
+    /// Get cache entry
     async fn get(&self, key: &str) -> Option<Symbol> {
         let mut entries = self.entries.write().await;
         let mut order = self.access_order.write().await;
 
         if let Some(entry) = entries.get(key) {
-            // 先克隆符号
+            // Clone symbol first
             let symbol = entry.symbol.clone();
 
-            // 更新访问时间
+            // Update access time
             let mut updated = entry.clone();
             updated.last_access = chrono::Utc::now();
 
-            // 更新 LRU 顺序
+            // Update LRU order
             order.retain(|k| k != key);
             let key_clone = key.to_string();
             order.push(key_clone.clone());
 
-            // 直接插入
+            // Insert directly
             entries.insert(key_clone, updated);
 
             trace!(key = %key, cache = "L2", "Cache hit");
@@ -231,7 +231,7 @@ impl L2Cache {
         }
     }
 
-    /// 存储缓存条目
+    /// Store cache entry
     async fn put(&self, key: String, symbol: Symbol) {
         let mut entries = self.entries.write().await;
         let mut order = self.access_order.write().await;
@@ -259,7 +259,7 @@ impl L2Cache {
         trace!(key = %key, cache = "L2", "Cached");
     }
 
-    /// 清空缓存
+    /// Clear cache
     async fn clear(&self) {
         let mut entries = self.entries.write().await;
         let mut order = self.access_order.write().await;
@@ -270,7 +270,7 @@ impl L2Cache {
         debug!(cache = "L2", "Cache cleared");
     }
 
-    /// 失效指定键
+    /// Invalidate specific key
     async fn invalidate(&self, key: &str) {
         let mut entries = self.entries.write().await;
         let mut order = self.access_order.write().await;
@@ -282,23 +282,24 @@ impl L2Cache {
     }
 }
 
-/// L3 缓存 - 文件级缓存（持久化到磁盘）
+/// L3 cache - file-level cache (persisted to disk)
 ///
-/// 慢但容量大，按需从磁盘加载。
+/// Slow but large capacity, loaded from disk on demand.
 #[derive(Debug)]
 struct L3Cache {
-    /// 项目路径
+    /// Project path (kept for future use)
+    #[allow(dead_code)]
     project_path: PathBuf,
-    /// 缓存目录路径
+    /// Cache directory path
     cache_dir: PathBuf,
 }
 
 impl L3Cache {
-    /// 创建新的 L3 缓存
+    /// Create new L3 cache
     fn new(project_path: &Path) -> Result<Self> {
         let cache_dir = project_path.join(".rag").join(L3_CACHE_DIR);
 
-        // 创建缓存目录
+        // Create cache directory
         std::fs::create_dir_all(&cache_dir)
             .map_err(|e| RagError::Io(e))?;
 
@@ -308,14 +309,14 @@ impl L3Cache {
         })
     }
 
-    /// 获取缓存文件路径
+    /// Get cache file path
     fn cache_file_path(&self, key: &str) -> PathBuf {
         use sha2::{Digest, Sha256};
         let hash = format!("{:x}", Sha256::digest(key.as_bytes()));
         self.cache_dir.join(format!("{}.json", hash))
     }
 
-    /// 获取缓存条目
+    /// Get cache entry
     async fn get(&self, key: &str) -> Option<Symbol> {
         let cache_path = self.cache_file_path(key);
 
@@ -344,7 +345,7 @@ impl L3Cache {
         }
     }
 
-    /// 存储缓存条目
+    /// Store cache entry
     async fn put(&self, key: String, symbol: Symbol) -> Result<()> {
         let cache_path = self.cache_file_path(&key);
 
@@ -365,7 +366,7 @@ impl L3Cache {
         Ok(())
     }
 
-    /// 清空缓存（删除所有缓存文件）
+    /// Clear cache (delete all cache files)
     async fn clear(&self) -> Result<()> {
         let mut entries = tokio::fs::read_dir(&self.cache_dir).await
             .map_err(|e| RagError::Io(e))?;
@@ -385,7 +386,7 @@ impl L3Cache {
         Ok(())
     }
 
-    /// 失效指定键
+    /// Invalidate specific key
     async fn invalidate(&self, key: &str) -> Result<()> {
         let cache_path = self.cache_file_path(key);
 
@@ -400,24 +401,24 @@ impl L3Cache {
     }
 }
 
-/// 三级符号缓存系统
+/// Three-tier symbol cache system
 ///
-/// 整合 L1/L2/L3 缓存层级，提供统一的缓存接口。
+/// Integrates L1/L2/L3 cache tiers, providing a unified cache interface.
 pub struct SymbolCache {
-    /// L1 缓存（内存热数据）
+    /// L1 cache (in-memory hot data)
     l1: L1Cache,
-    /// L2 缓存（符号级）
+    /// L2 cache (symbol-level)
     l2: L2Cache,
-    /// L3 缓存（文件级）
+    /// L3 cache (file-level)
     l3: L3Cache,
 }
 
 impl SymbolCache {
-    /// 创建新的符号缓存
+    /// Create new symbol cache
     ///
-    /// # 参数
+    /// # Arguments
     ///
-    /// * `project_path` - 项目路径
+    /// * `project_path` - Project path
     pub fn new(project_path: &Path) -> Result<Self> {
         let l3 = L3Cache::new(project_path)?;
 
@@ -428,42 +429,42 @@ impl SymbolCache {
         })
     }
 
-    /// 创建分支感知的缓存键
+    /// Create branch-aware cache key
     ///
-    /// # 参数
+    /// # Arguments
     ///
-    /// * `symbol_id` - 符号 ID
-    /// * `branch` - Git 分支名称
+    /// * `symbol_id` - Symbol ID
+    /// * `branch` - Git branch name
     pub fn cache_key(&self, symbol_id: &str, branch: &str) -> String {
         format!("{}:{}", branch, symbol_id)
     }
 
-    /// 获取符号（自动查找所有缓存层级）
+    /// Get symbol (search all cache tiers automatically)
     ///
-    /// 查找顺序：L1 -> L2 -> L3
+    /// Search order: L1 -> L2 -> L3
     ///
-    /// # 参数
+    /// # Arguments
     ///
-    /// * `symbol_id` - 符号 ID
-    /// * `branch` - Git 分支名称
+    /// * `symbol_id` - Symbol ID
+    /// * `branch` - Git branch name
     pub async fn get(&self, symbol_id: &str, branch: &str) -> Result<Option<Symbol>> {
         let key = self.cache_key(symbol_id, branch);
 
-        // L1 缓存
+        // L1 cache
         if let Some(symbol) = self.l1.get(&key).await {
             return Ok(Some(symbol));
         }
 
-        // L2 缓存
+        // L2 cache
         if let Some(symbol) = self.l2.get(&key).await {
-            // 提升到 L1
+            // Promote to L1
             self.l1.put(key.clone(), symbol.clone()).await;
             return Ok(Some(symbol));
         }
 
-        // L3 缓存
+        // L3 cache
         if let Some(symbol) = self.l3.get(&key).await {
-            // 提升到 L1 和 L2
+            // Promote to L1 and L2
             self.l2.put(key.clone(), symbol.clone()).await;
             self.l1.put(key, symbol.clone()).await;
             return Ok(Some(symbol));
@@ -472,16 +473,16 @@ impl SymbolCache {
         Ok(None)
     }
 
-    /// 存储符号（写入所有缓存层级）
+    /// Store symbol (write to all cache tiers)
     ///
-    /// # 参数
+    /// # Arguments
     ///
-    /// * `symbol` - 符号数据
-    /// * `branch` - Git 分支名称
+    /// * `symbol` - Symbol data
+    /// * `branch` - Git branch name
     pub async fn put(&self, symbol: Symbol, branch: &str) -> Result<()> {
         let key = self.cache_key(&symbol.id, branch);
 
-        // 存储到所有层级
+        // Store to all tiers
         self.l1.put(key.clone(), symbol.clone()).await;
         self.l2.put(key.clone(), symbol.clone()).await;
         self.l3.put(key, symbol).await?;
@@ -489,14 +490,14 @@ impl SymbolCache {
         Ok(())
     }
 
-    /// 失效符号缓存
+    /// Invalidate symbol cache
     ///
-    /// 从所有缓存层级中移除指定符号。
+    /// Remove specified symbol from all cache tiers.
     ///
-    /// # 参数
+    /// # Arguments
     ///
-    /// * `symbol_id` - 符号 ID
-    /// * `branch` - Git 分支名称
+    /// * `symbol_id` - Symbol ID
+    /// * `branch` - Git branch name
     pub async fn invalidate(&self, symbol_id: &str, branch: &str) -> Result<()> {
         let key = self.cache_key(symbol_id, branch);
 
@@ -507,20 +508,20 @@ impl SymbolCache {
         Ok(())
     }
 
-    /// 失效分支的所有缓存
+    /// Invalidate all cache for a branch
     ///
-    /// 当分支切换时调用此方法清理旧分支缓存。
+    /// Call this method when switching branches to clean up old branch cache.
     ///
-    /// # 参数
+    /// # Arguments
     ///
-    /// * `branch` - Git 分支名称
+    /// * `branch` - Git branch name
     pub async fn invalidate_branch(&self, branch: &str) -> Result<()> {
-        // 清空 L1 和 L2（包含所有分支数据）
+        // Clear L1 and L2 (contains all branch data)
         self.l1.clear().await;
         self.l2.clear().await;
 
-        // L3 缓存需要按键过滤删除
-        // 为简单起见，这里清空整个 L3 缓存
+        // L3 cache needs filtered deletion by key
+        // For simplicity, clear entire L3 cache here
         self.l3.clear().await?;
 
         debug!(branch = %branch, "Branch cache invalidated");
@@ -528,7 +529,7 @@ impl SymbolCache {
         Ok(())
     }
 
-    /// 清空所有缓存
+    /// Clear all caches
     pub async fn clear_all(&self) -> Result<()> {
         self.l1.clear().await;
         self.l2.clear().await;
@@ -573,10 +574,10 @@ mod tests {
             last_commit_hash: None,
         };
 
-        // 存储符号
+        // Store symbol
         cache.put(symbol.clone(), "main").await.unwrap();
 
-        // 获取符号
+        // Get symbol
         let retrieved = cache.get("test-symbol", "main").await.unwrap();
 
         assert!(retrieved.is_some());
@@ -614,11 +615,11 @@ mod tests {
             last_commit_hash: None,
         };
 
-        // 存储然后失效
+        // Store then invalidate
         cache.put(symbol, "main").await.unwrap();
         cache.invalidate("test-symbol", "main").await.unwrap();
 
-        // 应该获取不到
+        // Should not get it
         let result = cache.get("test-symbol", "main").await.unwrap();
         assert!(result.is_none());
     }

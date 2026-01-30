@@ -71,14 +71,19 @@
 
 ## Phase 8: Claude Code Integration
 
-30. **Implement Skills generator**
+30. **Implement Skills generator** ✅ Completed
     - Generate rag-query.sh, rag-code.sh, etc.
     - Install to `~/.claude/skills/`
-31. **Implement MCP Server**
+31. **Implement MCP Server** ✅ Completed
     - MCP protocol implementation (stdio communication)
     - Implement tools: rag_query, rag_search_code, rag_search_docs, rag_search_session
     - Support time-aware queries (timeline, commit-specific)
-32. Configure MCP to Claude Code
+32. Configure MCP to Claude Code ✅ Completed
+33. **Plan Indexing** ✅ Completed
+    - Plan model with title/content/chunk support
+    - Four-level project matching strategy
+    - PlanCollector with incremental collection
+    - Storage integration (plan: prefix)
 
 ## Phase 9: Feature Refinement
 
@@ -106,16 +111,16 @@
 
 | Phase | Status | Notes |
 |-------|--------|-------|
-| Phase 1: Basic Framework | ⬜ Not Started | |
-| Phase 2: Data Parsing | ⬜ Not Started | |
-| Phase 3: Embedding Service | ⬜ Not Started | |
-| Phase 4: Storage Layer | ⬜ Not Started | Core dependency |
-| Phase 5: File Scanning | ⬜ Not Started | |
-| Phase 5a: Git History | ⬜ Not Started | ⭐ New feature |
-| Phase 6: Hook + Daemon | ⬜ Not Started | |
-| Phase 7: Time-Aware Retrieval | 🟡 In Progress | ⭐ GitSync with persistent caching implemented |
-| Phase 8: Claude Code Integration | ⬜ Not Started | |
-| Phase 9: Feature Refinement | ⬜ Not Started | |
+| Phase 1: Basic Framework | 🟢 Completed | |
+| Phase 2: Data Parsing | 🟢 Completed | |
+| Phase 3: Embedding Service | 🟢 Completed | |
+| Phase 4: Storage Layer | 🟢 Completed | Core dependency |
+| Phase 5: File Scanning | 🟢 Completed | |
+| Phase 5a: Git History | 🟢 Completed | ⭐ New feature |
+| Phase 6: Hook + Daemon | 🟢 Completed | |
+| Phase 7: Time-Aware Retrieval | 🟢 Completed | ⭐ GitSync with persistent caching implemented |
+| Phase 8: Claude Code Integration | 🟢 Completed | ⭐ Plan indexing implemented |
+| Phase 9: Feature Refinement | 🟢 Completed | |
 
 ---
 

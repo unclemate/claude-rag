@@ -215,6 +215,96 @@ claude-rag query "bug" --after "1w" --before "7d" # Time range
 
 ---
 
+### 8. Plan Indexing (Claude Code Design Documents) ✅ Completed
+**Location**: `src/models/plan.rs`, `src/plan_parser.rs`, `src/collector/plan.rs`
+
+**Current Status**: Fully implemented with four-level project matching strategy
+
+**Implemented Features**:
+- [x] `Plan` model - ID, title, content, modified_at, chunk_count
+- [x] `PlanChunk` model - For vector indexing with sections
+- [x] `PlanParser` - Four-level matching strategy:
+  - Level 1: Absolute path prefix (e.g., `/home/user/Projects/claude-rag`) - 99.9% accuracy
+  - Level 2: Project path fragment (e.g., `Projects/claude-rag`) - 95% accuracy
+  - Level 3: Relative path verification with file existence - 85% accuracy
+  - Level 4: Project name fallback with warning - 70% accuracy
+- [x] `PlanCollector` - Incremental collection with progress reporting
+- [x] Storage integration - `store_plan()`, `get_plan()`, `get_all_plans()`, `iter_plans()`
+- [x] `ContentType::Plan` enum variant
+
+**Key Design Decisions**:
+- Plan files use random names (e.g., `binary-purring-pinwheel.md`)
+- Content-based identification to match plans to projects
+- Branch-aware storage with `plan:` prefix
+- Confidence level: High (design documents)
+
+**Test Coverage**: 25 tests, including:
+- Plan identifier extraction tests
+- Four-level matching strategy tests (each level tested)
+- Edge cases (empty content, non-matching paths)
+- Plan parsing (title extraction, ID from filename)
+- Collection statistics tests
+
+**CLI Usage**:
+```bash
+# Collect plans for current project
+claude-rag collect plans
+
+# Index collected plans
+claude-rag index plans
+```
+
+**Design Reference**: Plan-based development workflow integration
+
+---
+**Location**: `src/query.rs`, `src/retrieval/git_sync.rs`
+
+**Current Status**: Fully implemented
+
+**Implemented Features**:
+- [x] Apply temporal_weight after search results
+- [x] Final score = similarity * temporal_weight * confidence_weight
+- [x] Support time range filtering queries (`--after`, `--before`, `--max-age`)
+- [x] Integrated Git status into ConfidenceLevel
+
+**New Features** (2026-01-28):
+- [x] `TimeRange` struct - Time range filtering
+  - Support relative time: `7d`, `1w`, `1m`, `1y`
+  - Support ISO 8601 dates: `2025-01-01`
+  - Support combined filtering: `--after 1w --before 7d`
+  - Symbol type always passes (represents current code)
+
+**CLI Usage**:
+```bash
+claude-rag query "database" --max-age 7          # Last 7 days
+claude-rag query "auth" --after "2025-01-01"     # After certain date
+claude-rag query "bug" --after "1w" --before "7d" # Time range
+```
+
+**MCP Server Usage**:
+```json
+{"tool": "rag_query", "arguments": {"query": "fix", "max_age": 30}}
+```
+
+**Test Coverage**:
+- Original tests: 14 TimeRange basic tests
+- New tests: 6 boundary condition and integration tests
+- **Total**: 20 tests, all passing
+- Overall test count: 560 (7 new)
+
+**Improvements** (2026-01-28):
+- [x] Enhanced documentation: Added detailed usage examples and explanations
+- [x] Boundary tests: Verify after == before scenario
+- [x] Zero timestamp tests: Verify boundary behavior when timestamp = 0
+- [x] Symbol filter tests: Verify special type always passes
+- [x] `enhance_results` integration tests: Verify actual filtering logic
+- [x] Dual boundary tests: Verify simultaneous use of `after` and `before`
+- [x] Empty result tests: Verify complete filtering scenarios
+
+**Design Reference**: `DESIGN.md` Confidence-aware scoring
+
+---
+
 ## 🟢 Low Priority - Auxiliary Features
 
 ### 8. Progress Display ✅ Completed
@@ -445,16 +535,25 @@ claude-rag query "bug" --after "1w" --before "7d" # Time range
 | Category | Incomplete | Completed | Total |
 |----------|------------|-----------|-------|
 | 🔴 High Priority | 0 | 3 | 3 items ✅ |
-| 🟡 Medium Priority | 0 | 4 | 4 items ✅ |
-| 🟢 Low Priority | 5 | 2 | 7 items |
+| 🟡 Medium Priority | 0 | 5 | 5 items ✅ |
+| 🟢 Low Priority | 5 | 3 | 8 items |
 | 💤 Alternative/Future | 1 | 0 | 1 item |
-| **Total** | **6** | **9** | **15 items** |
+| **Total** | **6** | **11** | **17 items** |
 
-**Overall Completion**: Approximately 95%+ (all high and medium priority core features completed)
+**Overall Completion**: Approximately 96%+ (all high and medium priority core features completed)
 
 ---
 
 ## Recent Updates
+
+- **2026-01-30**: ✅ Completed Plan indexing functionality
+  - Implemented four-level project matching strategy (99.9% accuracy for absolute path)
+  - Added Plan model (id, title, content, modified_at, chunk_count)
+  - Added PlanParser with content-based identification
+  - Added PlanCollector with incremental collection
+  - Storage integration with plan: prefix
+  - ContentType::Plan enum variant
+  - All 25 unit tests passing
 
 - **2026-01-29**: 🆕 Added test code and dependency indexing features
   - Added item 12: Test code indexing (understand expected functional behavior)

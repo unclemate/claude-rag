@@ -9,6 +9,7 @@ pub mod file;
 pub mod message;
 pub mod session;
 pub mod symbol;
+pub mod plan;
 
 pub use chunk::{ChunkKind, DocChunk};
 pub use commit::Commit;
@@ -17,6 +18,7 @@ pub use file::File;
 pub use message::{Message, Role};
 pub use session::Session;
 pub use symbol::{Symbol, SymbolKind};
+pub use plan::{Plan, PlanChunk};
 
 /// Content type enum for indexed items.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
@@ -33,4 +35,6 @@ pub enum ContentType {
     Commit,
     /// Git diff.
     GitDiff,
+    /// Claude Code plan (design document).
+    Plan,
 }

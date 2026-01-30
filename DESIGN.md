@@ -318,6 +318,22 @@ Claude Code session starts
 - Git context formatting
 - Color-coded age indicators
 
+### 17. Plan Parser (`src/plan_parser.rs`) ⭐
+- Parse Claude Code plan files from `~/.claude/plans/`
+- Four-level project matching strategy:
+  - Level 1: Absolute path prefix (highest accuracy)
+  - Level 2: Project path fragment
+  - Level 3: Relative path verification
+  - Level 4: Project name fallback (with warning)
+- Extract plan metadata (ID, title, modification time)
+- Support incremental collection
+
+### 18. Plan Collector (`src/collector/plan.rs`) ⭐
+- Collect plan files for current project
+- Incremental collection based on storage state
+- Progress reporting support
+- Integration with storage manager (plan: prefix)
+
 ---
 
 ## Data Structure Design
@@ -333,6 +349,7 @@ enum ContentType {
     Symbol,     // Function/class symbols
     Commit,     // ⭐ Git commit
     GitDiff,    // ⭐ Git diff
+    Plan,       // ⭐ Claude Code plan (design document)
 }
 ```
 
@@ -468,6 +485,53 @@ Value: {
   "vector": [0.1, 0.2, ...],
   "indexedAt": 1234567890
 }
+```
+
+**⭐ Plan Data (Claude Code Design Documents):**
+```
+Key:   plan:{planId}
+Value: {
+  "id": "...",                  // Plan ID (filename without extension)
+  "title": "...",               // Plan title (first heading)
+  "content": "...",             // Full markdown content
+  "modifiedAt": 1234567890,     // File modification time
+  "chunkCount": 5,              // Number of indexed chunks
+  "indexed": true,              // Whether indexed
+  "indexedAt": 1234567890
+}
+```
+
+**⭐ PlanChunk Data (for vector indexing):**
+```
+Key:   plan_chunk:{chunkId}
+Value: {
+  "id": "...",                  // hash(planId:section:lineRange)
+  "planId": "...",              // Parent plan ID
+  "content": "...",             // Chunk content
+  "section": "...",             // Heading path (e.g., "## Implementation")
+  "lineRange": [1, 50],         // Line range in original plan
+  "vector": [0.1, 0.2, ...],
+  "indexedAt": 1234567890
+}
+```
+
+**⭐ Plan Matching Strategy (Four-Level):**
+```
+Level 1 (Highest Confidence): Absolute path prefix match
+  Example: "/home/user/Projects/claude-rag"
+  Accuracy: 99.9%
+
+Level 2: Project path fragment match
+  Example: "Projects/claude-rag"
+  Accuracy: 95%
+
+Level 3: Relative path verification with file existence
+  Example: "src/collector/file.rs" + file exists check
+  Accuracy: 85%
+
+Level 4 (Fallback): Project name match with warning
+  Example: "claude-rag"
+  Accuracy: 70%
 ```
 
 **⭐ Confidence Level:**
@@ -723,7 +787,8 @@ src/
 │   ├── file.rs          # File struct
 │   ├── symbol.rs        # Symbol struct with branch awareness ⭐
 │   ├── commit.rs        # ⭐ Git commit struct
-│   └── diff.rs          # ⭐ Git diff struct
+│   ├── diff.rs          # ⭐ Git diff struct
+│   └── plan.rs          # ⭐ Plan struct (Claude Code design documents)
 │
 ├── storage/             # Storage layer (sled + HNSW)
 │   ├── mod.rs
@@ -734,7 +799,8 @@ src/
 │   ├── mod.rs
 │   ├── session.rs       # Session collection from JSONL
 │   ├── file.rs          # File scanning (source/docs)
-│   └── git.rs           # ⭐ Git history collection (git2)
+│   ├── git.rs           # ⭐ Git history collection (git2)
+│   └── plan.rs          # ⭐ Plan collection (Claude Code design documents)
 │
 ├── retrieval/           # ⭐ Time-aware retrieval
 │   ├── mod.rs
@@ -797,6 +863,7 @@ skills/
 | `src/models/symbol.rs` | Symbol struct (functions/classes) with branch awareness ⭐ |
 | `src/models/commit.rs` | ⭐ Git commit metadata |
 | `src/models/diff.rs` | ⭐ Git diff content |
+| `src/models/plan.rs` | ⭐ Plan struct (Claude Code design documents) |
 | **`src/storage/`** | **Storage layer (modular)** |
 | `src/storage/sled.rs` | sled KV database wrapper with branch-aware symbol storage ⭐ |
 | `src/storage/hnsw.rs` | HNSW vector index (self-implemented) |
@@ -804,6 +871,7 @@ skills/
 | `src/collector/session.rs` | Session JSONL parsing |
 | `src/collector/file.rs` | File scanning with .gitignore |
 | `src/collector/git.rs` | ⭐ Git history via git2 |
+| `src/collector/plan.rs` | ⭐ Claude Code plan collection |
 | **`src/retrieval/`** | **⭐ Time-aware retrieval (modular)** |
 | `src/retrieval/confidence.rs` | Confidence level (5 levels) |
 | `src/retrieval/decay.rs` | Temporal decay calculator |
@@ -814,6 +882,8 @@ skills/
 | `src/scanner.rs` | File scanner (source/docs classification) |
 | `src/ast.rs` | Tree-sitter AST parser for code symbols |
 | `src/vector.rs` | Vector building (chunking + normalization) |
+| `src/plan_parser.rs` | ⭐ Plan file parser with four-level project matching |
+| `src/hook.rs` | Hook system (session-start script generation) |
 | `src/hook.rs` | Hook system (session-start script generation) |
 | `src/daemon.rs` | Daemon service (fsnotify, session management) |
 | `src/skills.rs` | Skills generator (bash scripts) |

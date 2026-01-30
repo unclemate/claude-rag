@@ -15,6 +15,7 @@ Claude RAG is a Rust tool that builds a **complete time-aware RAG knowledge base
 - **Documentation**: README, design docs, comments, etc.
 - **Other Files**: Configs, test cases, etc.
 - **Git History**: Commit history and diffs with temporal context ⭐
+- **Claude Code Plans**: Design documents and implementation plans with four-level project matching ⭐
 
 ### Key Features
 
@@ -82,6 +83,7 @@ Data is stored locally in each project's `.rag/` directory, ensuring privacy and
 | **Doc Files** | FileScanner | File-level + paragraph-level |
 | **Other Files** | FileScanner | File-level |
 | **Git History** | GitCollector (git2) | Per commit + per file diff (optional, requires Git repo) |
+| **Claude Code Plans** ⭐ | PlanParser (4-level matching) | Plan-level + section-level |
 
 ### Storage Design
 
@@ -215,6 +217,10 @@ claude-rag query "bug" --after "1w" --before "7d" # Time range
 claude-rag index-code --branch main            # Index current branch symbols
 claude-rag index-code --all                     # Index all branches
 claude-rag index-code --project /path/to/project --branch feature/api
+
+# ⭐ Plan indexing (Claude Code design documents)
+claude-rag collect plans                        # Collect project plans
+claude-rag index plans                          # Index collected plans
 
 # Output example:
 # 🎯 Found 3 relevant contexts

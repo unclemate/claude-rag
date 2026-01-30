@@ -39,6 +39,7 @@ dirs = "5"
 walkdir = "2"
 ignore = "0.4"
 sha2 = "0.10"
+regex = "1"
 
 # Tree-sitter for AST parsing
 tree-sitter = "0.22"

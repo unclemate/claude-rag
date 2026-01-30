@@ -278,6 +278,7 @@ impl ResultFormatter {
             ContentType::Symbol => "`Symbol`".to_string(),
             ContentType::Commit => "`Commit`".to_string(),
             ContentType::GitDiff => "`GitDiff`".to_string(),
+            ContentType::Plan => "`Plan`".to_string(),
         }
     }
 
