@@ -106,7 +106,6 @@ use serde_json::{json, Value};
 use std::fmt::{Display, Write};
 use std::io::{self, BufRead, BufReader, Write as IoWrite};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use tracing::warn;
 
 // ==========================================================================
@@ -238,8 +237,9 @@ pub struct McpServer {
     storage: StorageManager,
     /// Embedding client for query vectorization.
     client: EmbeddingClient,
-    /// Shared Tokio runtime for async operations.
-    runtime: Arc<tokio::runtime::Runtime>,
+    /// Tokio runtime handle for async operations.
+    /// We store the handle instead of the runtime to avoid panic on drop.
+    _runtime_handle: tokio::runtime::Handle,
 }
 
 impl McpServer {
@@ -298,14 +298,24 @@ impl McpServer {
         // Initialize embedding client
         let client = EmbeddingClient::from_config(&config.embedding);
 
-        // Create shared Tokio runtime
-        let runtime = tokio::runtime::Runtime::new()
+        // Create Tokio runtime and get a handle
+        // We use thread_local runtime with 1 thread for MCP server (single-threaded is fine)
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
             .map_err(|e| RagError::Config(format!("Failed to create runtime: {}", e)))?;
+
+        let handle = runtime.handle().clone();
+
+        // Leak the runtime to prevent it from being dropped
+        // This is necessary because dropping a Runtime from within a blocking context
+        // can cause a panic. The MCP server runs for the lifetime of the process anyway.
+        Box::leak(Box::new(runtime));
 
         Ok(Self {
             storage,
             client,
-            runtime: Arc::new(runtime),
+            _runtime_handle: handle,
         })
     }
 
@@ -458,7 +468,7 @@ impl McpServer {
                 })
             }
             Err(_) => {
-                self.runtime.block_on(async {
+                self._runtime_handle.block_on(async {
                     self.client.embed(query).await
                 })
             }
@@ -1047,8 +1057,8 @@ impl McpServer {
                 })
             }
             Err(_) => {
-                // Not in a runtime, use the server's runtime
-                self.runtime.block_on(executor.execute(&options))
+                // Not in a runtime, use the server's runtime handle
+                self._runtime_handle.block_on(executor.execute(&options))
             }
         };
 
