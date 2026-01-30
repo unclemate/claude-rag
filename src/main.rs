@@ -736,11 +736,183 @@ fn handle_query(
 
 fn handle_status() -> Result<()> {
     info!("Checking system status");
-    println!("Status:");
-    // TODO: Implement status
-    println!("  Database: initialized");
-    println!("  Indexed items: 0");
+
+    let current_dir = std::env::current_dir()
+        .map_err(|e| anyhow::anyhow!("Failed to get current directory: {}", e))?;
+
+    // Open storage manager
+    let storage = match claude_rag::storage::sled::StorageManager::open_project_db(&current_dir) {
+        Ok(s) => s,
+        Err(e) => {
+            println!("Claude RAG Status");
+            println!("=================\n");
+            println!("Database Status: not initialized");
+            println!("  Run 'claude-rag init' to initialize the knowledge base");
+            return Err(anyhow::anyhow!("Database not initialized: {}", e));
+        }
+    };
+
+    // Collect statistics
+    let db_empty = storage.is_empty();
+    let db_size = storage.size_on_disk().unwrap_or(0);
+    let has_hnsw = storage.has_hnsw_index();
+
+    // Count sessions and messages
+    let mut session_count = 0usize;
+    let mut message_count = 0usize;
+
+    storage.iter_sessions(|s| {
+        session_count += 1;
+        message_count += s.message_count;
+        Ok(())
+    })?;
+
+    // Count commits
+    let mut commit_count = 0usize;
+    storage.iter_commits(|_c| {
+        commit_count += 1;
+        Ok(())
+    })?;
+
+    // Get project files
+    let project_path = current_dir.display().to_string();
+    let file_count = storage.get_project_files(&project_path)
+        .map(|f| f.len())
+        .unwrap_or(0);
+
+    // Count symbols (scan all branch: prefixed symbols)
+    let mut symbol_count = 0usize;
+    for item in storage.db().scan_prefix("symbol:") {
+        if item.is_ok() {
+            symbol_count += 1;
+        }
+    }
+
+    // Get indexed branches
+    let branches = storage.get_indexed_branches().unwrap_or_default();
+
+    // Get HNSW statistics
+    let (hnsw_nodes, hnsw_max_level, hnsw_size) = if has_hnsw {
+        if let Ok(Some(index)) = storage.load_hnsw() {
+            let nodes = index.len();
+            let max_level = index.max_level();
+
+            // Get HNSW file size
+            let hnsw_path = claude_rag::ConfigManager::rag_dir(&current_dir).join("hnsw.bin");
+            let size = if hnsw_path.exists() {
+                std::fs::metadata(&hnsw_path)
+                    .map(|m| m.len())
+                    .unwrap_or(0)
+            } else {
+                0
+            };
+
+            (Some(nodes), Some(max_level), Some(size))
+        } else {
+            (None, None, None)
+        }
+    } else {
+        (None, None, None)
+    };
+
+    // Format output
+    println!("Claude RAG Status");
+    println!("=================\n");
+
+    // Database section
+    println!("Database:");
+    println!("  Status: {}", if db_empty { "empty" } else { "active" });
+    println!("  Size on disk: {}", format_bytes(db_size));
+    println!("  Location: {}", claude_rag::ConfigManager::db_dir(&current_dir).display());
+
+    println!();
+
+    // Vector Index section
+    println!("Vector Index (HNSW):");
+    if has_hnsw {
+        println!("  Status: active");
+        if let Some(nodes) = hnsw_nodes {
+            println!("  Nodes: {}", format_number(nodes));
+        }
+        if let Some(max_level) = hnsw_max_level {
+            println!("  Max level: {}", max_level);
+        }
+        if let Some(size) = hnsw_size {
+            println!("  Index file: .rag/hnsw.bin ({})", format_bytes(size));
+        }
+    } else {
+        println!("  Status: not built");
+        println!("  Run 'claude-rag index-code' to build the vector index");
+    }
+
+    println!();
+
+    // Content Statistics section
+    println!("Content Statistics:");
+    println!("  Sessions: {}", format_number(session_count));
+    println!("  Messages: {}", format_number(message_count));
+    println!("  Files: {}", format_number(file_count));
+    println!("  Commits: {}", format_number(commit_count));
+    println!("  Symbols: {}", format_number(symbol_count));
+
+    println!();
+
+    // Indexed Branches section
+    if !branches.is_empty() {
+        println!("Indexed Branches:");
+        for branch in &branches {
+            println!("  - {}", branch);
+        }
+        println!();
+    } else {
+        println!("Indexed Branches: none");
+        println!();
+    }
+
+    // Last Updated
+    println!("Last Updated:");
+    println!("  Check .rag/logs/ for detailed history");
+
     Ok(())
+}
+
+/// Format a byte count as human-readable (e.g., "1.23 MB")
+fn format_bytes(bytes: u64) -> String {
+    const KB: u64 = 1024;
+    const MB: u64 = KB * 1024;
+    const GB: u64 = MB * 1024;
+
+    if bytes >= GB {
+        format!("{:.2} GB", bytes as f64 / GB as f64)
+    } else if bytes >= MB {
+        format!("{:.2} MB", bytes as f64 / MB as f64)
+    } else if bytes >= KB {
+        format!("{:.2} KB", bytes as f64 / KB as f64)
+    } else {
+        format!("{} B", bytes)
+    }
+}
+
+/// Format a number with thousands separator
+fn format_number(n: usize) -> String {
+    let mut buffer = String::new();
+    let mut n = n;
+    let mut digits = 0;
+
+    if n == 0 {
+        return "0".to_string();
+    }
+
+    while n > 0 {
+        if digits > 0 && digits % 3 == 0 {
+            buffer.push(',');
+        }
+        buffer.push(char::from_digit((n % 10) as u32, 10).unwrap());
+        n /= 10;
+        digits += 1;
+    }
+
+    buffer.chars().rev().collect()
 }
 
 fn handle_install_skills() -> Result<()> {
@@ -769,3 +941,4 @@ fn handle_install_skills() -> Result<()> {
     println!("    /rag:timeline  - Build feature timeline");
     Ok(())
 }
+// Test change
